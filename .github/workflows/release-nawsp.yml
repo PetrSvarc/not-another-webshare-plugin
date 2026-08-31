@@ -101,11 +101,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh workflow run publish-kodi-repository.yml --ref "v${VERSION}"
+        run: >-
+          gh workflow run publish-kodi-repository.yml
+          --ref main
+          -f release_tag="v${VERSION}"
 
       - name: Summary
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           echo "## NAWSP ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Created release tag \`v${VERSION}\` and dispatched the Kodi repository publisher." >> "$GITHUB_STEP_SUMMARY"
+          echo "Created release tag \`v${VERSION}\` and dispatched the Kodi repository publisher from \`main\`." >> "$GITHUB_STEP_SUMMARY"
