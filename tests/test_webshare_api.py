@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import requests
 
+from download_utils import sanitize_filename
 from webshare_api import (
     WebshareApiError,
     WebshareClient,
@@ -120,6 +121,22 @@ class WebshareClientTests(unittest.TestCase):
             stream=True,
             timeout=(1, 1),
         )
+
+    def test_sanitize_filename_blocks_path_traversal(self):
+        self.assertEqual("outside.mkv", sanitize_filename("../outside.mkv", "ABC"))
+        self.assertEqual("outside.mkv", sanitize_filename(r"..\..\outside.mkv", "ABC"))
+
+    def test_sanitize_filename_uses_safe_fallback_for_path_only_name(self):
+        self.assertEqual("ABC", sanitize_filename("../..", "ABC"))
+
+    def test_sanitize_filename_handles_platform_invalid_names(self):
+        self.assertEqual("_CON.mkv", sanitize_filename("CON.mkv", "ABC"))
+        self.assertEqual("movie_name_.mkv", sanitize_filename('movie:name?.mkv', "ABC"))
+
+    def test_sanitize_filename_preserves_extension_when_trimming(self):
+        result = sanitize_filename("a" * 300 + ".mkv", "ABC", max_length=40)
+        self.assertEqual(40, len(result))
+        self.assertTrue(result.endswith(".mkv"))
 
 
 if __name__ == "__main__":
