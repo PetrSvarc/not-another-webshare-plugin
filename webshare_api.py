@@ -63,6 +63,15 @@ class WebshareClient:
     def set_token(self, token: str) -> None:
         if token:
             self.session.cookies.set("wst", token, domain="webshare.cz", path="/")
+            return
+
+        for cookie in list(self.session.cookies):
+            if cookie.name == "wst":
+                self.session.cookies.clear(
+                    domain=cookie.domain,
+                    path=cookie.path,
+                    name=cookie.name,
+                )
 
     def _post(self, endpoint: str, data: Optional[dict] = None) -> ET.Element:
         try:
@@ -133,7 +142,11 @@ class WebshareClient:
 
     def user_data(self, token: str) -> ET.Element:
         self.set_token(token)
-        return self._post("user_data", self._auth(token))
+        try:
+            return self._post("user_data", self._auth(token))
+        except WebshareApiError:
+            self.set_token("")
+            raise
 
     def search(
         self,
