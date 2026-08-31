@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.nawsp" name="Not Another WebShare Plugin" version="0.4.0" provider-name="PetrSvarc; based on cache-sk YAWSP and community extensions">
+<addon id="plugin.video.nawsp" name="Not Another WebShare Plugin" version="0.5.0" provider-name="PetrSvarc; based on cache-sk YAWSP and community extensions">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
         <import addon="script.module.requests" version="2.18.4"/>
@@ -18,6 +18,13 @@
         <license>AGPL-3.0</license>
         <source>https://github.com/PetrSvarc/not-another-webshare-plugin</source>
         <news>
+[B]0.5.0[/B]
+- group equivalent movie and TV episode search results into version folders
+- rank versions deterministically using language, quality, codec and Webshare metadata
+- add preferred language/quality, HEVC and password-protected-file search preferences
+- show a user-facing Best match label while preserving the original Webshare filename
+- add Kodi-independent media parsing/ranking tests and package validation
+
 [B]0.4.0[/B]
 - extracted Webshare HTTP/XML handling into a dedicated Python 3 API client
 - aligned login, search, queue and file-link requests with the current Webshare API reference
