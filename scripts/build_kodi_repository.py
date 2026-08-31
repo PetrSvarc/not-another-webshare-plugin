@@ -27,6 +27,7 @@ PLUGIN_ROOT_FILES = (
     "yawsp.py",
     "webshare_api.py",
     "download_utils.py",
+    "media_results.py",
 )
 PLUGIN_DIRECTORIES = ("resources",)
 FIXED_ZIP_DATE = (2020, 1, 1, 0, 0, 0)
