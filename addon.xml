@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.nawsp" name="Not Another WebShare Plugin" version="0.3.0" provider-name="PetrSvarc; based on cache-sk YAWSP and community extensions">
+<addon id="plugin.video.nawsp" name="Not Another WebShare Plugin" version="0.4.0" provider-name="PetrSvarc; based on cache-sk YAWSP and community extensions">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
         <import addon="script.module.requests" version="2.18.4"/>
@@ -18,6 +18,14 @@
         <license>AGPL-3.0</license>
         <source>https://github.com/PetrSvarc/not-another-webshare-plugin</source>
         <news>
+[B]0.4.0[/B]
+- extracted Webshare HTTP/XML handling into a dedicated Python 3 API client
+- aligned login, search, queue and file-link requests with the current Webshare API reference
+- added network timeouts and explicit API/transport errors
+- removed Python 2 compatibility branches and the legacy Backup DB experiment
+- localized the series manager UI
+- added automated API-client tests and GitHub Actions validation
+
 [B]0.3.0 NAWSP fork[/B]
 - renamed project and Kodi add-on identity to Not Another WebShare Plugin / plugin.video.nawsp
 - preserved YAWSP 0.3.0 Webshare functionality and series manager

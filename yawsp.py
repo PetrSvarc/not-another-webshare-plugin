@@ -1,714 +1,960 @@
 # -*- coding: utf-8 -*-
-# Module: default
-# Author: cache-sk
-# Created on: 10.5.2020
+# Module: NAWSP Kodi UI/router
+# Original YAWSP author: cache-sk
 # License: AGPL v.3 https://www.gnu.org/licenses/agpl-3.0.html
-# Modified for Not Another WebShare Plugin (NAWSP), 2026-08-31.
-# Changes: renamed project branding/add-on identity while preserving YAWSP functionality.
+# Modernized for Not Another WebShare Plugin (NAWSP), 2026-08-31.
+
+from __future__ import annotations
 
 import io
+import json
 import os
+import re
 import sys
+import traceback
+import uuid
+from urllib.parse import parse_qsl, urlencode
+
+import unidecode
 import xbmc
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
 import xbmcvfs
-import requests.cookies
-from xml.etree import ElementTree as ET
-import hashlib
-from md5crypt import md5crypt
-import traceback
-import json
-import unidecode
-import re
-import zipfile
-import uuid
+
 import series_manager
+from webshare_api import WebshareApiError, WebshareClient, WebshareError
 
-try:
-    from urllib import urlencode
-    from urlparse import parse_qsl, urlparse
-except ImportError:
-    from urllib.parse import urlencode
-    from urllib.parse import parse_qsl, urlparse
 
-try:
-    from xbmc import translatePath
-except ImportError:
-    from xbmcvfs import translatePath
-
-BASE = 'https://webshare.cz'
-API = BASE + '/api/'
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36"
-HEADERS = {'User-Agent': UA, 'Referer':BASE}
-REALM = ':Webshare:'
-CATEGORIES = ['','video','images','audio','archives','docs','adult']
-SORTS = ['','recent','rating','largest','smallest']
-SEARCH_HISTORY = 'search_history'
-NONE_WHAT = '%#NONE#%'
-BACKUP_DB = 'D1iIcURxlR'
+CATEGORIES = ["", "video", "images", "audio", "archives", "docs", "adult"]
+SORTS = ["", "recent", "rating", "largest", "smallest"]
+SEARCH_HISTORY = "search_history"
+NONE_WHAT = "%#NONE#%"
 
 _url = sys.argv[0]
 _handle = int(sys.argv[1])
 _addon = xbmcaddon.Addon()
-_session = requests.Session()
-_session.headers.update(HEADERS)
-_profile = translatePath(_addon.getAddonInfo('profile'))
-try:
-    _profile = _profile.decode("utf-8")
-except:
-    pass
+_profile = xbmcvfs.translatePath(_addon.getAddonInfo("profile"))
+_client = WebshareClient()
+
+
+def log(message, level=xbmc.LOGINFO):
+    xbmc.log(f"NAWSP: {message}", level=level)
+
 
 def get_url(**kwargs):
-    return '{0}?{1}'.format(_url, urlencode(kwargs, 'utf-8'))
+    return f"{_url}?{urlencode(kwargs)}"
 
-def api(fnct, data):
-    response = _session.post(API + fnct + "/", data=data)
-    return response
 
-def is_ok(xml):
-    status = xml.find('status').text
-    return status == 'OK'
+def popinfo(
+    message,
+    heading=None,
+    icon=xbmcgui.NOTIFICATION_INFO,
+    time=3000,
+    sound=False,
+):
+    xbmcgui.Dialog().notification(
+        heading or _addon.getAddonInfo("name"),
+        message,
+        icon,
+        time,
+        sound=sound,
+    )
 
-def popinfo(message, heading=_addon.getAddonInfo('name'), icon=xbmcgui.NOTIFICATION_INFO, time=3000, sound=False):
-    xbmcgui.Dialog().notification(heading, message, icon, time, sound=sound)
+
+def handle_webshare_error(exc, message_id=30107):
+    log(str(exc), xbmc.LOGERROR)
+    popinfo(
+        _addon.getLocalizedString(message_id),
+        icon=xbmcgui.NOTIFICATION_ERROR,
+        sound=True,
+    )
+
 
 def login():
-    username = _addon.getSetting('wsuser')
-    password = _addon.getSetting('wspass')
-    if username == '' or password == '':
+    username = _addon.getSetting("wsuser").strip()
+    password = _addon.getSetting("wspass")
+
+    if not username or not password:
         popinfo(_addon.getLocalizedString(30101), sound=True)
         _addon.openSettings()
-        return
-    response = api('salt', {'username_or_email': username})
-    xml = ET.fromstring(response.content)
-    if is_ok(xml):
-        salt = xml.find('salt').text
-        try:
-            encrypted_pass = hashlib.sha1(md5crypt(password.encode('utf-8'), salt.encode('utf-8'))).hexdigest()
-            pass_digest = hashlib.md5(username.encode('utf-8') + REALM + encrypted_pass.encode('utf-8')).hexdigest()
-        except TypeError:
-            encrypted_pass = hashlib.sha1(md5crypt(password.encode('utf-8'), salt.encode('utf-8')).encode('utf-8')).hexdigest()
-            pass_digest = hashlib.md5(username.encode('utf-8') + REALM.encode('utf-8') + encrypted_pass.encode('utf-8')).hexdigest()
-        response = api('login', {'username_or_email': username, 'password': encrypted_pass, 'digest': pass_digest, 'keep_logged_in': 1})
-        xml = ET.fromstring(response.content)
-        if is_ok(xml):
-            token = xml.find('token').text
-            _addon.setSetting('token', token)
-            return token
-        else:
-            popinfo(_addon.getLocalizedString(30102), icon=xbmcgui.NOTIFICATION_ERROR, sound=True)
-            _addon.openSettings()
-    else:
-        popinfo(_addon.getLocalizedString(30102), icon=xbmcgui.NOTIFICATION_ERROR, sound=True)
-        _addon.openSettings()
+        return None
+
+    try:
+        token = _client.login(username, password)
+    except WebshareError as exc:
+        log(f"Login failed: {exc}", xbmc.LOGERROR)
+        popinfo(
+            _addon.getLocalizedString(30102),
+            icon=xbmcgui.NOTIFICATION_ERROR,
+            sound=True,
+        )
+        return None
+
+    _addon.setSetting("token", token)
+    return token
+
 
 def revalidate():
-    token = _addon.getSetting('token')
-    if len(token) == 0:
-        if login():
-            return revalidate()
-    else:
-        response = api('user_data', {'wst': token})
-        xml = ET.fromstring(response.content)
-        if is_ok(xml):
-            vip = xml.find('vip').text
-            if vip != '1':
-                popinfo(_addon.getLocalizedString(30103), icon=xbmcgui.NOTIFICATION_WARNING)
-            return token
-        else:
-            if login():
-                return revalidate()
+    token = _addon.getSetting("token")
 
-def todict(xml, skip=[]):
+    if token:
+        try:
+            user_xml = _client.user_data(token)
+            if user_xml.findtext("vip") != "1":
+                popinfo(
+                    _addon.getLocalizedString(30103),
+                    icon=xbmcgui.NOTIFICATION_WARNING,
+                )
+            return token
+        except WebshareError as exc:
+            log(f"Stored token is not valid: {exc}", xbmc.LOGWARNING)
+            _addon.setSetting("token", "")
+
+    return login()
+
+
+def element_to_dict(element, skip=None):
+    skip = set(skip or ())
     result = {}
-    for e in xml:
-        if e.tag not in skip:
-            value = e.text if len(list(e)) == 0 else todict(e,skip)
-            if e.tag in result:
-                if isinstance(result[e.tag], list):
-                    result[e.tag].append(value)
-                else:
-                    result[e.tag] = [result[e.tag],value]
-            else:
-                result[e.tag] = value
+
+    for child in element:
+        if child.tag in skip:
+            continue
+
+        value = child.text if len(child) == 0 else element_to_dict(child, skip)
+        if child.tag not in result:
+            result[child.tag] = value
+        elif isinstance(result[child.tag], list):
+            result[child.tag].append(value)
+        else:
+            result[child.tag] = [result[child.tag], value]
+
     return result
 
-def sizelize(txtsize, units=['B','KB','MB','GB']):
-    if txtsize:
+
+def sizelize(txtsize, units=("B", "KB", "MB", "GB")):
+    if txtsize is None:
+        return "?"
+
+    try:
         size = float(txtsize)
-        if size < 1024:
-            size = str(size) + units[0]
-        else:
-            size = size / 1024
-            if size < 1024:
-                size = str(int(round(size))) + units[1]
-            else:
-                size = size / 1024
-                if size < 1024:
-                    size = str(round(size,2)) + units[2]
-                else:
-                    size = size / 1024
-                    size = str(round(size,2)) + units[3]
-        return size
-    return str(txtsize)
+    except (TypeError, ValueError):
+        return str(txtsize)
 
-def labelize(file):
-    if 'size' in file:
-        size = sizelize(file['size'])
-    elif 'sizelized' in file:
-        size = file['sizelized']
+    unit_index = 0
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+
+    if unit_index == 0:
+        value = str(int(size)) if size.is_integer() else str(size)
+    elif unit_index == 1:
+        value = str(int(round(size)))
     else:
-        size = '?'
-    return file['name'] + ' (' + size + ')'
+        value = str(round(size, 2))
 
-def tolistitem(file, addcommands=[]):
-    label = labelize(file)
+    return f"{value}{units[unit_index]}"
+
+
+def labelize(file_data):
+    size = file_data.get("size")
+    if size is None:
+        size = file_data.get("sizelized", "?")
+    else:
+        size = sizelize(size)
+    return f"{file_data.get('name', '?')} ({size})"
+
+
+def tolistitem(file_data, extra_commands=None):
+    label = labelize(file_data)
     listitem = xbmcgui.ListItem(label=label)
-    if 'img' in file:
-        listitem.setArt({'thumb': file['img']})
-    listitem.setInfo('video', {'title': label})
-    listitem.setProperty('IsPlayable', 'true')
+
+    if file_data.get("img"):
+        listitem.setArt({"thumb": file_data["img"]})
+
+    listitem.setInfo("video", {"title": label})
+    listitem.setProperty("IsPlayable", "true")
+
+    ident = file_data.get("ident")
     commands = []
-    commands.append((_addon.getLocalizedString(30211), 'RunPlugin(' + get_url(action='info',ident=file['ident']) + ')'))
-    commands.append((_addon.getLocalizedString(30212), 'RunPlugin(' + get_url(action='download',ident=file['ident']) + ')'))
-    if addcommands:
-        commands = commands + addcommands
-    listitem.addContextMenuItems(commands)
+    if ident:
+        commands.extend(
+            [
+                (
+                    _addon.getLocalizedString(30211),
+                    f"RunPlugin({get_url(action='info', ident=ident)})",
+                ),
+                (
+                    _addon.getLocalizedString(30212),
+                    f"RunPlugin({get_url(action='download', ident=ident)})",
+                ),
+            ]
+        )
+
+    commands.extend(extra_commands or [])
+    if commands:
+        listitem.addContextMenuItems(commands)
+
     return listitem
 
-def ask(what):
-    if what is None:
-        what = ''
-    kb = xbmc.Keyboard(what, _addon.getLocalizedString(30007))
-    kb.doModal()
-    if kb.isConfirmed():
-        return kb.getText()
-    return None
+
+def ask(default_text=""):
+    keyboard = xbmc.Keyboard(default_text or "", _addon.getLocalizedString(30007))
+    keyboard.doModal()
+    return keyboard.getText() if keyboard.isConfirmed() else None
+
+
+def _ensure_profile():
+    if not xbmcvfs.exists(_profile):
+        xbmcvfs.mkdirs(_profile)
+
+
+def _history_path():
+    return os.path.join(_profile, SEARCH_HISTORY)
+
 
 def loadsearch():
-    history = []
+    _ensure_profile()
+    path = _history_path()
+
+    if not xbmcvfs.exists(path):
+        return []
+
     try:
-        if not os.path.exists(_profile):
-            os.makedirs(_profile)
-    except Exception:
-        traceback.print_exc()
+        with io.open(path, "r", encoding="utf-8") as history_file:
+            data = json.load(history_file)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError, TypeError):
+        log("Failed to load search history", xbmc.LOGWARNING)
+        return []
+
+
+def _write_search_history(history):
+    _ensure_profile()
     try:
-        with io.open(os.path.join(_profile, SEARCH_HISTORY), 'r', encoding='utf8') as file:
-            fdata = file.read()
-            try:
-                history = json.loads(fdata, "utf-8")
-            except TypeError:
-                history = json.loads(fdata)
-    except Exception:
+        with io.open(_history_path(), "w", encoding="utf-8") as history_file:
+            json.dump(history, history_file, ensure_ascii=False)
+    except OSError:
+        log("Failed to save search history", xbmc.LOGERROR)
         traceback.print_exc()
-    return history
+
 
 def storesearch(what):
-    if what:
-        size = int(_addon.getSetting('shistory'))
-        history = loadsearch()
-        if what in history:
-            history.remove(what)
-        history = [what] + history
-        if len(history) > size:
-            history = history[:size]
-        try:
-            with io.open(os.path.join(_profile, SEARCH_HISTORY), 'w', encoding='utf8') as file:
-                try:
-                    data = json.dumps(history).decode('utf8')
-                except AttributeError:
-                    data = json.dumps(history)
-                file.write(data)
-        except Exception:
-            traceback.print_exc()
+    if not what:
+        return
+
+    try:
+        max_items = max(1, int(_addon.getSetting("shistory") or 20))
+    except ValueError:
+        max_items = 20
+
+    history = [item for item in loadsearch() if item != what]
+    history.insert(0, what)
+    _write_search_history(history[:max_items])
+
 
 def removesearch(what):
-    if what:
-        history = loadsearch()
-        if what in history:
-            history.remove(what)
-            try:
-                with io.open(os.path.join(_profile, SEARCH_HISTORY), 'w', encoding='utf8') as file:
-                    try:
-                        data = json.dumps(history).decode('utf8')
-                    except AttributeError:
-                        data = json.dumps(history)
-                    file.write(data)
-            except Exception:
-                traceback.print_exc()
+    history = [item for item in loadsearch() if item != what]
+    _write_search_history(history)
+
 
 def dosearch(token, what, category, sort, limit, offset, action):
-    response = api('search', {'what':'' if what == NONE_WHAT else what, 'category':category, 'sort':sort, 'limit':limit, 'offset':offset, 'wst':token, 'maybe_removed':'true'})
-    xml = ET.fromstring(response.content)
-    if is_ok(xml):
-        if offset > 0:
-            listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30206))
-            listitem.setArt({'icon': 'DefaultAddonsSearch.png'})
-            xbmcplugin.addDirectoryItem(_handle, get_url(action=action, what=what, category=category, sort=sort, limit=limit, offset=offset - limit if offset > limit else 0), listitem, True)
-        for file in xml.iter('file'):
-            item = todict(file)
-            commands = [(_addon.getLocalizedString(30214), 'Container.Update(' + get_url(action='search',toqueue=item['ident'], what=what, offset=offset) + ')')]
-            listitem = tolistitem(item, commands)
-            xbmcplugin.addDirectoryItem(_handle, get_url(action='play',ident=item['ident'],name=item['name']), listitem, False)
-        try:
-            total = int(xml.find('total').text)
-        except:
-            total = 0
-        if offset + limit < total:
-            listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30207))
-            listitem.setArt({'icon': 'DefaultAddonsSearch.png'})
-            xbmcplugin.addDirectoryItem(_handle, get_url(action=action, what=what, category=category, sort=sort, limit=limit, offset=offset+limit), listitem, True)
-    else:
-        popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
+    try:
+        xml = _client.search(
+            token,
+            "" if what == NONE_WHAT else what,
+            category=category,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+    except WebshareError as exc:
+        handle_webshare_error(exc)
+        return
+
+    if offset > 0:
+        listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30206))
+        listitem.setArt({"icon": "DefaultAddonsSearch.png"})
+        previous_offset = max(0, offset - limit)
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(
+                action=action,
+                what=what,
+                category=category,
+                sort=sort,
+                limit=limit,
+                offset=previous_offset,
+            ),
+            listitem,
+            True,
+        )
+
+    for file_element in xml.iter("file"):
+        item = element_to_dict(file_element)
+        ident = item.get("ident")
+        name = item.get("name")
+        if not ident or not name:
+            continue
+
+        commands = [
+            (
+                _addon.getLocalizedString(30214),
+                "Container.Update("
+                + get_url(
+                    action="search",
+                    toqueue=ident,
+                    what=what,
+                    category=category,
+                    sort=sort,
+                    limit=limit,
+                    offset=offset,
+                )
+                + ")",
+            )
+        ]
+        listitem = tolistitem(item, commands)
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(action="play", ident=ident, name=name),
+            listitem,
+            False,
+        )
+
+    try:
+        total = int(xml.findtext("total") or 0)
+    except ValueError:
+        total = 0
+
+    if offset + limit < total:
+        listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30207))
+        listitem.setArt({"icon": "DefaultAddonsSearch.png"})
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(
+                action=action,
+                what=what,
+                category=category,
+                sort=sort,
+                limit=limit,
+                offset=offset + limit,
+            ),
+            listitem,
+            True,
+        )
+
 
 def search(params):
-    xbmcplugin.setPluginCategory(_handle, _addon.getAddonInfo('name') + " \\ " + _addon.getLocalizedString(30201))
+    xbmcplugin.setPluginCategory(
+        _handle,
+        f"{_addon.getAddonInfo('name')} \\ {_addon.getLocalizedString(30201)}",
+    )
     token = revalidate()
-    updateListing = False
-    if 'remove' in params:
-        removesearch(params['remove'])
-        updateListing = True
-    if 'toqueue' in params:
-        toqueue(params['toqueue'], token)
-        updateListing = True
-    what = params.get('what')
-    if 'ask' in params:
-        slast = _addon.getSetting('slast')
-        if slast != what:
-            what = ask(what)
+    if not token:
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+
+    update_listing = False
+
+    if params.get("remove"):
+        removesearch(params["remove"])
+        update_listing = True
+
+    if params.get("toqueue"):
+        toqueue(params["toqueue"], token)
+        update_listing = True
+
+    what = params.get("what")
+    if "ask" in params:
+        previous = _addon.getSetting("slast")
+        if previous != what:
+            what = ask(what or "")
             if what is not None:
                 storesearch(what)
             else:
-                updateListing = True
+                update_listing = True
+
     if what is not None:
-        if 'offset' not in params:
-            _addon.setSetting('slast', what)
+        if "offset" not in params:
+            _addon.setSetting("slast", what)
         else:
-            _addon.setSetting('slast', NONE_WHAT)
-            updateListing = True
-        category = params['category'] if 'category' in params else CATEGORIES[int(_addon.getSetting('scategory'))]
-        sort = params['sort'] if 'sort' in params else SORTS[int(_addon.getSetting('ssort'))]
-        limit = int(params['limit']) if 'limit' in params else int(_addon.getSetting('slimit'))
-        offset = int(params['offset']) if 'offset' in params else 0
-        dosearch(token, what, category, sort, limit, offset, 'search')
+            _addon.setSetting("slast", NONE_WHAT)
+            update_listing = True
+
+        category = params.get(
+            "category",
+            CATEGORIES[int(_addon.getSetting("scategory") or 1)],
+        )
+        sort = params.get("sort", SORTS[int(_addon.getSetting("ssort") or 0)])
+        limit = int(params.get("limit", _addon.getSetting("slimit") or 25))
+        offset = int(params.get("offset", 0))
+        dosearch(token, what, category, sort, limit, offset, "search")
     else:
-        _addon.setSetting('slast', NONE_WHAT)
-        history = loadsearch()
+        _addon.setSetting("slast", NONE_WHAT)
+
         listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30205))
-        listitem.setArt({'icon': 'DefaultAddSource.png'})
-        xbmcplugin.addDirectoryItem(_handle, get_url(action='search',ask=1), listitem, True)
+        listitem.setArt({"icon": "DefaultAddSource.png"})
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(action="search", ask=1),
+            listitem,
+            True,
+        )
+
         listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30208))
-        listitem.setArt({'icon': 'DefaultAddonsRecentlyUpdated.png'})
-        xbmcplugin.addDirectoryItem(_handle, get_url(action='search',what=NONE_WHAT,sort=SORTS[1]), listitem, True)
+        listitem.setArt({"icon": "DefaultAddonsRecentlyUpdated.png"})
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(action="search", what=NONE_WHAT, sort="recent"),
+            listitem,
+            True,
+        )
+
         listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30209))
-        listitem.setArt({'icon': 'DefaultHardDisk.png'})
-        xbmcplugin.addDirectoryItem(_handle, get_url(action='search',what=NONE_WHAT,sort=SORTS[3]), listitem, True)
-        for search_term in history:
+        listitem.setArt({"icon": "DefaultHardDisk.png"})
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(action="search", what=NONE_WHAT, sort="largest"),
+            listitem,
+            True,
+        )
+
+        for search_term in loadsearch():
             listitem = xbmcgui.ListItem(label=search_term)
-            listitem.setArt({'icon': 'DefaultAddonsSearch.png'})
-            commands = [(_addon.getLocalizedString(30213), 'Container.Update(' + get_url(action='search',remove=search_term) + ')')]
-            listitem.addContextMenuItems(commands)
-            xbmcplugin.addDirectoryItem(_handle, get_url(action='search',what=search_term,ask=1), listitem, True)
-    xbmcplugin.endOfDirectory(_handle, updateListing=updateListing)
+            listitem.setArt({"icon": "DefaultAddonsSearch.png"})
+            listitem.addContextMenuItems(
+                [
+                    (
+                        _addon.getLocalizedString(30213),
+                        "Container.Update("
+                        + get_url(action="search", remove=search_term)
+                        + ")",
+                    )
+                ]
+            )
+            xbmcplugin.addDirectoryItem(
+                _handle,
+                get_url(action="search", what=search_term, ask=1),
+                listitem,
+                True,
+            )
+
+    xbmcplugin.endOfDirectory(_handle, updateListing=update_listing)
+
 
 def queue(params):
-    xbmcplugin.setPluginCategory(_handle, _addon.getAddonInfo('name') + " \\ " + _addon.getLocalizedString(30202))
+    xbmcplugin.setPluginCategory(
+        _handle,
+        f"{_addon.getAddonInfo('name')} \\ {_addon.getLocalizedString(30202)}",
+    )
     token = revalidate()
-    updateListing = False
-    if 'dequeue' in params:
-        response = api('dequeue_file', {'dequeue':params['dequeue'],'ident':params['dequeue'],'wst':token})
-        xml = ET.fromstring(response.content)
-        if is_ok(xml):
+    if not token:
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+
+    update_listing = False
+
+    if params.get("dequeue"):
+        try:
+            _client.dequeue_file(token, params["dequeue"])
             popinfo(_addon.getLocalizedString(30106))
-        else:
-            popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
-        updateListing = True
-    response = api('queue', {'wst':token})
-    xml = ET.fromstring(response.content)
-    if is_ok(xml):
-        for file in xml.iter('file'):
-            item = todict(file)
-            commands = [(_addon.getLocalizedString(30215), 'Container.Update(' + get_url(action='queue',dequeue=item['ident']) + ')')]
-            listitem = tolistitem(item, commands)
-            xbmcplugin.addDirectoryItem(_handle, get_url(action='play',ident=item['ident'],name=item['name']), listitem, False)
-    else:
-        popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
-    xbmcplugin.endOfDirectory(_handle, updateListing=updateListing)
+        except WebshareError as exc:
+            handle_webshare_error(exc)
+        update_listing = True
+
+    try:
+        xml = _client.queue(token)
+    except WebshareError as exc:
+        handle_webshare_error(exc)
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+
+    for file_element in xml.iter("file"):
+        item = element_to_dict(file_element)
+        ident = item.get("ident")
+        name = item.get("name")
+        if not ident or not name:
+            continue
+
+        commands = [
+            (
+                _addon.getLocalizedString(30215),
+                "Container.Update(" + get_url(action="queue", dequeue=ident) + ")",
+            )
+        ]
+        listitem = tolistitem(item, commands)
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(action="play", ident=ident, name=name),
+            listitem,
+            False,
+        )
+
+    xbmcplugin.endOfDirectory(_handle, updateListing=update_listing)
+
 
 def toqueue(ident, token):
-    response = api('queue_file', {'ident':ident,'wst':token})
-    xml = ET.fromstring(response.content)
-    if is_ok(xml):
+    try:
+        _client.queue_file(token, ident)
         popinfo(_addon.getLocalizedString(30105))
-    else:
-        popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
+    except WebshareError as exc:
+        handle_webshare_error(exc)
+
 
 def history(params):
-    xbmcplugin.setPluginCategory(_handle, _addon.getAddonInfo('name') + " \\ " + _addon.getLocalizedString(30203))
+    xbmcplugin.setPluginCategory(
+        _handle,
+        f"{_addon.getAddonInfo('name')} \\ {_addon.getLocalizedString(30203)}",
+    )
     token = revalidate()
-    updateListing = False
-    if 'remove' in params:
-        remove = params['remove']
-        updateListing = True
-        response = api('history', {'wst':token})
-        xml = ET.fromstring(response.content)
-        ids = []
-        if is_ok(xml):
-            for file in xml.iter('file'):
-                if remove == file.find('ident').text:
-                    ids.append(file.find('download_id').text)
-        else:
-            popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
-        if ids:
-            rr = api('clear_history', {'ids[]':ids,'wst':token})
-            xml = ET.fromstring(rr.content)
-            if is_ok(xml):
-                popinfo(_addon.getLocalizedString(30104))
-            else:
-                popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
-    if 'toqueue' in params:
-        toqueue(params['toqueue'], token)
-        updateListing = True
-    response = api('history', {'wst':token})
-    xml = ET.fromstring(response.content)
-    files = []
-    if is_ok(xml):
-        for file in xml.iter('file'):
-            item = todict(file, ['ended_at', 'download_id', 'started_at'])
-            if item not in files:
-                files.append(item)
-        for file in files:
-            commands = [
-                (_addon.getLocalizedString(30213), 'Container.Update(' + get_url(action='history',remove=file['ident']) + ')'),
-                (_addon.getLocalizedString(30214), 'Container.Update(' + get_url(action='history',toqueue=file['ident']) + ')')
-            ]
-            listitem = tolistitem(file, commands)
-            xbmcplugin.addDirectoryItem(_handle, get_url(action='play',ident=file['ident'],name=file['name']), listitem, False)
-    else:
-        popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
-    xbmcplugin.endOfDirectory(_handle, updateListing=updateListing)
+    if not token:
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
 
-def settings(params):
+    update_listing = False
+
+    if params.get("remove"):
+        try:
+            history_xml = _client.history(token)
+            download_ids = [
+                file_element.findtext("download_id")
+                for file_element in history_xml.iter("file")
+                if file_element.findtext("ident") == params["remove"]
+                and file_element.findtext("download_id")
+            ]
+            if download_ids:
+                _client.clear_history(token, download_ids)
+                popinfo(_addon.getLocalizedString(30104))
+        except WebshareError as exc:
+            handle_webshare_error(exc)
+        update_listing = True
+
+    if params.get("toqueue"):
+        toqueue(params["toqueue"], token)
+        update_listing = True
+
+    try:
+        xml = _client.history(token)
+    except WebshareError as exc:
+        handle_webshare_error(exc)
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+
+    seen = set()
+    for file_element in xml.iter("file"):
+        item = element_to_dict(
+            file_element,
+            skip={"ended_at", "download_id", "started_at"},
+        )
+        ident = item.get("ident")
+        name = item.get("name")
+        if not ident or not name or ident in seen:
+            continue
+        seen.add(ident)
+
+        commands = [
+            (
+                _addon.getLocalizedString(30213),
+                "Container.Update(" + get_url(action="history", remove=ident) + ")",
+            ),
+            (
+                _addon.getLocalizedString(30214),
+                "Container.Update(" + get_url(action="history", toqueue=ident) + ")",
+            ),
+        ]
+        listitem = tolistitem(item, commands)
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(action="play", ident=ident, name=name),
+            listitem,
+            False,
+        )
+
+    xbmcplugin.endOfDirectory(_handle, updateListing=update_listing)
+
+
+def settings(_params):
     _addon.openSettings()
     xbmcplugin.setResolvedUrl(_handle, False, xbmcgui.ListItem())
 
-def infonize(data,key,process=str,showkey=True,prefix='',suffix='\n'):
-    if key in data:
-        return prefix + (key.capitalize() + ': ' if showkey else '') + process(data[key]) + suffix
-    return ''
+
+def infonize(data, key, process=str, showkey=True, prefix="", suffix="\n"):
+    value = data.get(key)
+    if value is None:
+        return ""
+    label = f"{key.capitalize()}: " if showkey else ""
+    return prefix + label + process(value) + suffix
+
 
 def fpsize(fps):
-    x = round(float(fps),3)
-    if int(x) == x:
-        return str(int(x))
-    return str(x)
+    value = round(float(fps), 3)
+    return str(int(value)) if int(value) == value else str(value)
 
-def getinfo(ident,wst):
-    response = api('file_info', {'ident':ident,'wst':wst})
-    xml = ET.fromstring(response.content)
-    ok = is_ok(xml)
-    if not ok:
-        response = api('file_info', {'ident':ident,'wst':wst,'maybe_removed':'true'})
-        xml = ET.fromstring(response.content)
-        ok = is_ok(xml)
-    if ok:
-        return xml
-    popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
-    return None
+
+def getinfo(ident, token):
+    try:
+        return _client.file_info_with_removed_fallback(token, ident)
+    except WebshareError as exc:
+        handle_webshare_error(exc)
+        return None
+
 
 def info(params):
     token = revalidate()
-    xml = getinfo(params['ident'], token)
-    if xml is not None:
-        info_data = todict(xml)
-        text = ''
-        text += infonize(info_data, 'name')
-        text += infonize(info_data, 'size', sizelize)
-        text += infonize(info_data, 'type')
-        text += infonize(info_data, 'width')
-        text += infonize(info_data, 'height')
-        text += infonize(info_data, 'format')
-        text += infonize(info_data, 'fps', fpsize)
-        text += infonize(info_data, 'bitrate', lambda x:sizelize(x,['bps','Kbps','Mbps','Gbps']))
-        if 'video' in info_data and 'stream' in info_data['video']:
-            streams = info_data['video']['stream']
-            if isinstance(streams, dict):
-                streams = [streams]
-            for stream in streams:
-                text += 'Video stream: '
-                text += infonize(stream, 'width', showkey=False, suffix='')
-                text += infonize(stream, 'height', showkey=False, prefix='x', suffix='')
-                text += infonize(stream, 'format', showkey=False, prefix=', ', suffix='')
-                text += infonize(stream, 'fps', fpsize, showkey=False, prefix=', ', suffix='')
-                text += '\n'
-        if 'audio' in info_data and 'stream' in info_data['audio']:
-            streams = info_data['audio']['stream']
-            if isinstance(streams, dict):
-                streams = [streams]
-            for stream in streams:
-                text += 'Audio stream: '
-                text += infonize(stream, 'format', showkey=False, suffix='')
-                text += infonize(stream, 'channels', prefix=', ', showkey=False, suffix='')
-                text += infonize(stream, 'bitrate', lambda x:sizelize(x,['bps','Kbps','Mbps','Gbps']), prefix=', ', showkey=False, suffix='')
-                text += '\n'
-        text += infonize(info_data, 'removed', lambda x:'Yes' if x=='1' else 'No')
-        xbmcgui.Dialog().textviewer(_addon.getAddonInfo('name'), text)
+    if not token:
+        return
 
-def getlink(ident,wst,dtype='video_stream'):
-    duuid = _addon.getSetting('duuid')
-    if not duuid:
-        duuid = str(uuid.uuid4())
-        _addon.setSetting('duuid', duuid)
-    data = {'ident':ident,'wst':wst,'download_type':dtype,'device_uuid':duuid}
-    response = api('file_link', data)
-    xml = ET.fromstring(response.content)
-    if is_ok(xml):
-        return xml.find('link').text
-    popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
-    return None
+    xml = getinfo(params["ident"], token)
+    if xml is None:
+        return
+
+    info_data = element_to_dict(xml)
+    text = ""
+    text += infonize(info_data, "name")
+    text += infonize(info_data, "size", sizelize)
+    text += infonize(info_data, "type")
+    text += infonize(info_data, "width")
+    text += infonize(info_data, "height")
+    text += infonize(info_data, "format")
+    text += infonize(info_data, "fps", fpsize)
+    text += infonize(
+        info_data,
+        "bitrate",
+        lambda x: sizelize(x, ("bps", "Kbps", "Mbps", "Gbps")),
+    )
+
+    video = info_data.get("video", {})
+    streams = video.get("stream", []) if isinstance(video, dict) else []
+    if isinstance(streams, dict):
+        streams = [streams]
+    for stream in streams:
+        text += "Video stream: "
+        text += infonize(stream, "width", showkey=False, suffix="")
+        text += infonize(stream, "height", showkey=False, prefix="x", suffix="")
+        text += infonize(stream, "format", showkey=False, prefix=", ", suffix="")
+        text += infonize(stream, "fps", fpsize, showkey=False, prefix=", ", suffix="")
+        text += "\n"
+
+    audio = info_data.get("audio", {})
+    streams = audio.get("stream", []) if isinstance(audio, dict) else []
+    if isinstance(streams, dict):
+        streams = [streams]
+    for stream in streams:
+        text += "Audio stream: "
+        text += infonize(stream, "format", showkey=False, suffix="")
+        text += infonize(stream, "channels", showkey=False, prefix=", ", suffix="")
+        text += infonize(
+            stream,
+            "bitrate",
+            lambda x: sizelize(x, ("bps", "Kbps", "Mbps", "Gbps")),
+            showkey=False,
+            prefix=", ",
+            suffix="",
+        )
+        text += "\n"
+
+    text += infonize(info_data, "removed", lambda value: "Yes" if value == "1" else "No")
+    xbmcgui.Dialog().textviewer(_addon.getAddonInfo("name"), text)
+
+
+def _device_uuid():
+    value = _addon.getSetting("duuid")
+    if not value:
+        value = str(uuid.uuid4())
+        _addon.setSetting("duuid", value)
+    return value
+
+
+def getlink(ident, token, download_type="video_stream"):
+    try:
+        return _client.file_link(
+            token,
+            ident,
+            download_type=download_type,
+            device_uuid=_device_uuid(),
+        )
+    except WebshareError as exc:
+        handle_webshare_error(exc)
+        return None
+
 
 def play(params):
     token = revalidate()
-    link = getlink(params['ident'], token)
-    if link is not None:
-        headers = _session.headers
-        if headers:
-            headers.update({'Cookie':'wst='+token})
-            link = link + '|' + urlencode(headers)
-        listitem = xbmcgui.ListItem(label=params['name'], path=link)
-        listitem.setProperty('mimetype', 'application/octet-stream')
-        xbmcplugin.setResolvedUrl(_handle, True, listitem)
-    else:
-        popinfo(_addon.getLocalizedString(30107), icon=xbmcgui.NOTIFICATION_WARNING)
+    if not token:
         xbmcplugin.setResolvedUrl(_handle, False, xbmcgui.ListItem())
+        return
 
-def join(path, file):
-    if path.endswith('/') or path.endswith('\\'):
-        return path + file
-    return path + '/' + file
+    link = getlink(params["ident"], token)
+    if not link:
+        xbmcplugin.setResolvedUrl(_handle, False, xbmcgui.ListItem())
+        return
+
+    headers = urlencode(_client.media_headers(token))
+    playback_url = f"{link}|{headers}" if headers else link
+    listitem = xbmcgui.ListItem(
+        label=params.get("name", ""),
+        path=playback_url,
+    )
+    listitem.setProperty("mimetype", "application/octet-stream")
+    xbmcplugin.setResolvedUrl(_handle, True, listitem)
+
+
+def _join_vfs(path, filename):
+    separator = "" if path.endswith(("/", "\\")) else "/"
+    return f"{path}{separator}{filename}"
+
+
+def _open_download_file(folder, filename):
+    if os.path.isdir(folder):
+        return io.open(os.path.join(folder, filename), "wb")
+    return xbmcvfs.File(_join_vfs(folder, filename), "w")
+
 
 def download(params):
     token = revalidate()
-    where = _addon.getSetting('dfolder')
-    if not where or not xbmcvfs.exists(where):
-        popinfo('set folder!', sound=True)
+    if not token:
+        return
+
+    folder = _addon.getSetting("dfolder")
+    if not folder or not xbmcvfs.exists(folder):
+        popinfo(_addon.getLocalizedString(30108), sound=True)
         _addon.openSettings()
         return
-    local = os.path.exists(where)
-    normalize = 'true' == _addon.getSetting('dnormalize')
-    notify = 'true' == _addon.getSetting('dnotify')
-    every = _addon.getSetting('dnevery')
-    try:
-        every = int(re.sub(r'[^\d]+', '', every))
-    except:
-        every = 10
-    name = params.get('name', 'download')
-    try:
-        link = getlink(params['ident'], token, 'file_download')
-        info_xml = getinfo(params['ident'], token)
-        name = info_xml.find('name').text
-        if normalize:
-            name = unidecode.unidecode(name)
-        bf = io.open(os.path.join(where,name), 'wb') if local else xbmcvfs.File(join(where,name), 'w')
-        response = _session.get(link, stream=True)
-        total = response.headers.get('content-length')
-        if total is None:
-            popinfo(_addon.getLocalizedString(30301) + name, icon=xbmcgui.NOTIFICATION_WARNING, sound=True)
-            bf.write(response.content)
-        elif not notify:
-            popinfo(_addon.getLocalizedString(30302) + name)
-            bf.write(response.content)
-        else:
-            popinfo(_addon.getLocalizedString(30302) + name)
-            dl = 0
-            total = int(total)
-            pct = total / 100
-            lastpop = 0
-            for data in response.iter_content(chunk_size=4096):
-                dl += len(data)
-                bf.write(data)
-                done = int(dl / pct)
-                if done % every == 0 and lastpop != done:
-                    popinfo(str(done) + '% - ' + name)
-                    lastpop = done
-        bf.close()
-        popinfo(_addon.getLocalizedString(30303) + name, sound=True)
-    except Exception:
-        traceback.print_exc()
-        popinfo(_addon.getLocalizedString(30304) + name, icon=xbmcgui.NOTIFICATION_ERROR, sound=True)
 
-def loaddb(dbdir, file_name):
-    try:
-        with io.open(os.path.join(dbdir, file_name), 'r', encoding='utf8') as file:
-            fdata = file.read()
-            try:
-                return json.loads(fdata, "utf-8")['data']
-            except TypeError:
-                return json.loads(fdata)['data']
-    except Exception:
-        traceback.print_exc()
-        return {}
+    normalize = _addon.getSettingBool("dnormalize")
+    notify = _addon.getSettingBool("dnotify")
 
-def db(params):
-    token = revalidate()
-    updateListing = False
-    dbdir = os.path.join(_profile,'db')
-    if not os.path.exists(dbdir):
-        link = getlink(BACKUP_DB, token)
-        dbfile = os.path.join(_profile,'db.zip')
-        with io.open(dbfile, 'wb') as bf:
-            response = _session.get(link, stream=True)
-            bf.write(response.content)
-        with zipfile.ZipFile(dbfile, 'r') as zf:
-            zf.extractall(_profile)
-        os.unlink(dbfile)
-    if 'toqueue' in params:
-        toqueue(params['toqueue'], token)
-        updateListing = True
-    if 'file' in params and 'key' in params:
-        data = loaddb(dbdir,params['file'])
-        item = next((x for x in data if x['id'] == params['key']), None)
-        if item is not None:
-            for stream in item['streams']:
-                commands = [(_addon.getLocalizedString(30214), 'Container.Update(' + get_url(action='db',file=params['file'],key=params['key'],toqueue=stream['ident']) + ')')]
-                listitem = tolistitem({'ident':stream['ident'],'name':stream['quality'] + ' - ' + stream['lang'] + stream['ainfo'],'sizelized':stream['size']}, commands)
-                xbmcplugin.addDirectoryItem(_handle, get_url(action='play',ident=stream['ident'],name=item['title']), listitem, False)
-    elif 'file' in params:
-        data = loaddb(dbdir,params['file'])
-        for item in data:
-            listitem = xbmcgui.ListItem(label=item['title'])
-            if 'plot' in item:
-                listitem.setInfo('video', {'title':item['title'],'plot':item['plot']})
-            xbmcplugin.addDirectoryItem(_handle, get_url(action='db',file=params['file'],key=item['id']), listitem, True)
-    else:
-        if os.path.exists(dbdir):
-            dbfiles = [f for f in os.listdir(dbdir) if os.path.isfile(os.path.join(dbdir, f))]
-            for dbfile in dbfiles:
-                listitem = xbmcgui.ListItem(label=os.path.splitext(dbfile)[0])
-                xbmcplugin.addDirectoryItem(_handle, get_url(action='db',file=dbfile), listitem, True)
-    xbmcplugin.addSortMethod(_handle, xbmcplugin.SORT_METHOD_LABEL)
-    xbmcplugin.endOfDirectory(_handle, updateListing=updateListing)
+    try:
+        notify_every = int(re.sub(r"\D+", "", _addon.getSetting("dnevery") or "10"))
+    except ValueError:
+        notify_every = 10
+
+    info_xml = getinfo(params["ident"], token)
+    if info_xml is None:
+        return
+
+    filename = info_xml.findtext("name") or params.get("name") or params["ident"]
+    if normalize:
+        filename = unidecode.unidecode(filename)
+
+    link = getlink(params["ident"], token, "file_download")
+    if not link:
+        return
+
+    target = None
+    response = None
+    try:
+        target = _open_download_file(folder, filename)
+        response = _client.open_stream(link)
+        total_text = response.headers.get("content-length")
+        total = int(total_text) if total_text and total_text.isdigit() else None
+        downloaded = 0
+        last_notified = -1
+
+        popinfo(_addon.getLocalizedString(30302) + filename)
+
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            target.write(chunk)
+            downloaded += len(chunk)
+
+            if notify and total:
+                percent = min(100, int(downloaded * 100 / total))
+                if percent // notify_every > last_notified // notify_every:
+                    popinfo(f"{percent}% - {filename}")
+                    last_notified = percent
+
+        popinfo(_addon.getLocalizedString(30303) + filename, sound=True)
+    except (OSError, WebshareError, ValueError) as exc:
+        log(f"Download failed: {exc}", xbmc.LOGERROR)
+        popinfo(
+            _addon.getLocalizedString(30304) + filename,
+            icon=xbmcgui.NOTIFICATION_ERROR,
+            sound=True,
+        )
+    finally:
+        if response is not None:
+            response.close()
+        if target is not None:
+            target.close()
+
 
 def menu():
-    revalidate()
-    xbmcplugin.setPluginCategory(_handle, _addon.getAddonInfo('name'))
-    listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30201))
-    listitem.setArt({'icon':'DefaultAddonsSearch.png'})
-    xbmcplugin.addDirectoryItem(_handle, get_url(action='search'), listitem, True)
-    listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30202))
-    listitem.setArt({'icon':'DefaultPlaylist.png'})
-    xbmcplugin.addDirectoryItem(_handle, get_url(action='queue'), listitem, True)
-    listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30203))
-    listitem.setArt({'icon':'DefaultAddonsUpdates.png'})
-    xbmcplugin.addDirectoryItem(_handle, get_url(action='history'), listitem, True)
-    listitem = xbmcgui.ListItem(label='Serialy')
-    listitem.setArt({'icon':'DefaultTVShows.png'})
-    xbmcplugin.addDirectoryItem(_handle, get_url(action='series'), listitem, True)
-    if 'true' == _addon.getSetting('experimental'):
-        listitem = xbmcgui.ListItem(label='Backup DB')
-        listitem.setArt({'icon':'DefaultAddonsZip.png'})
-        xbmcplugin.addDirectoryItem(_handle, get_url(action='db'), listitem, True)
-    listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(30204))
-    listitem.setArt({'icon':'DefaultAddonService.png'})
-    xbmcplugin.addDirectoryItem(_handle, get_url(action='settings'), listitem, False)
+    if not revalidate():
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+
+    xbmcplugin.setPluginCategory(_handle, _addon.getAddonInfo("name"))
+
+    items = [
+        (30201, "search", "DefaultAddonsSearch.png", True),
+        (30202, "queue", "DefaultPlaylist.png", True),
+        (30203, "history", "DefaultAddonsUpdates.png", True),
+        (30401, "series", "DefaultTVShows.png", True),
+        (30204, "settings", "DefaultAddonService.png", False),
+    ]
+
+    for label_id, action, icon, is_folder in items:
+        listitem = xbmcgui.ListItem(label=_addon.getLocalizedString(label_id))
+        listitem.setArt({"icon": icon})
+        xbmcplugin.addDirectoryItem(
+            _handle,
+            get_url(action=action),
+            listitem,
+            is_folder,
+        )
+
     xbmcplugin.endOfDirectory(_handle)
 
-def series_menu(params):
-    sm = series_manager.SeriesManager(_addon, _profile)
-    series_manager.create_series_menu(sm, _handle)
 
-def series_search(params):
+def series_menu(_params):
+    manager = series_manager.SeriesManager(_addon, _profile, _client)
+    series_manager.create_series_menu(manager, _handle)
+
+
+def series_search(_params):
     token = revalidate()
-    series_name = ask(None)
+    if not token:
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+
+    series_name = ask()
     if not series_name:
         xbmcplugin.endOfDirectory(_handle, succeeded=False)
         return
-    sm = series_manager.SeriesManager(_addon, _profile)
+
+    manager = series_manager.SeriesManager(_addon, _profile, _client)
     progress = xbmcgui.DialogProgress()
-    progress.create('NAWSP', f'Vyhledavam serial {series_name}...')
+    progress.create(
+        _addon.getAddonInfo("name"),
+        _addon.getLocalizedString(30405).format(series_name),
+    )
+
     try:
-        series_data = sm.search_series(series_name, api, token)
-        if not series_data or not series_data['seasons']:
-            progress.close()
-            popinfo('Nenalezeny zadne epizody tohoto serialu', icon=xbmcgui.NOTIFICATION_WARNING)
+        series_data = manager.search_series(series_name, token)
+        if not series_data.get("seasons"):
+            popinfo(
+                _addon.getLocalizedString(30406),
+                icon=xbmcgui.NOTIFICATION_WARNING,
+            )
             xbmcplugin.endOfDirectory(_handle, succeeded=False)
             return
-        progress.close()
-        popinfo(f'Nalezeno {sum(len(season) for season in series_data["seasons"].values())} epizod v {len(series_data["seasons"])} sezonach')
-        xbmc.executebuiltin(f'Container.Update({get_url(action="series_detail", series_name=series_name)})')
-    except Exception as e:
-        progress.close()
-        traceback.print_exc()
-        popinfo(f'Chyba: {str(e)}', icon=xbmcgui.NOTIFICATION_ERROR)
+
+        episode_count = sum(
+            len(season) for season in series_data["seasons"].values()
+        )
+        popinfo(
+            _addon.getLocalizedString(30407).format(
+                episode_count,
+                len(series_data["seasons"]),
+            )
+        )
+        xbmc.executebuiltin(
+            f"Container.Update({get_url(action='series_detail', series_name=series_name)})"
+        )
+    except WebshareError as exc:
+        handle_webshare_error(exc)
         xbmcplugin.endOfDirectory(_handle, succeeded=False)
+    finally:
+        progress.close()
+
 
 def series_detail(params):
-    xbmcplugin.setPluginCategory(_handle, _addon.getAddonInfo('name') + " \\ " + params['series_name'])
-    sm = series_manager.SeriesManager(_addon, _profile)
-    series_manager.create_seasons_menu(sm, _handle, params['series_name'])
+    series_name = params["series_name"]
+    xbmcplugin.setPluginCategory(
+        _handle,
+        f"{_addon.getAddonInfo('name')} \\ {series_name}",
+    )
+    manager = series_manager.SeriesManager(_addon, _profile, _client)
+    series_manager.create_seasons_menu(manager, _handle, series_name)
+
 
 def series_season(params):
-    series_name = params['series_name']
-    season = params['season']
-    xbmcplugin.setPluginCategory(_handle, _addon.getAddonInfo('name') + " \\ " + series_name + " \\ " + f"Rada {season}")
-    sm = series_manager.SeriesManager(_addon, _profile)
-    series_manager.create_episodes_menu(sm, _handle, series_name, season)
+    series_name = params["series_name"]
+    season = params["season"]
+    xbmcplugin.setPluginCategory(
+        _handle,
+        f"{_addon.getAddonInfo('name')} \\ {series_name} \\ "
+        + _addon.getLocalizedString(30408).format(season),
+    )
+    manager = series_manager.SeriesManager(_addon, _profile, _client)
+    series_manager.create_episodes_menu(manager, _handle, series_name, season)
+
 
 def series_refresh(params):
     token = revalidate()
-    series_name = params['series_name']
-    sm = series_manager.SeriesManager(_addon, _profile)
+    if not token:
+        xbmcplugin.endOfDirectory(_handle, succeeded=False)
+        return
+
+    series_name = params["series_name"]
+    manager = series_manager.SeriesManager(_addon, _profile, _client)
     progress = xbmcgui.DialogProgress()
-    progress.create('NAWSP', f'Aktualizuji data pro serial {series_name}...')
+    progress.create(
+        _addon.getAddonInfo("name"),
+        _addon.getLocalizedString(30409).format(series_name),
+    )
+
     try:
-        series_data = sm.search_series(series_name, api, token)
-        if not series_data or not series_data['seasons']:
-            progress.close()
-            popinfo('Nenalezeny zadne epizody tohoto serialu', icon=xbmcgui.NOTIFICATION_WARNING)
+        series_data = manager.search_series(series_name, token)
+        if not series_data.get("seasons"):
+            popinfo(
+                _addon.getLocalizedString(30406),
+                icon=xbmcgui.NOTIFICATION_WARNING,
+            )
             xbmcplugin.endOfDirectory(_handle, succeeded=False)
             return
-        progress.close()
-        popinfo(f'Aktualizovano: {sum(len(season) for season in series_data["seasons"].values())} epizod v {len(series_data["seasons"])} sezonach')
-        xbmc.executebuiltin(f'Container.Update({get_url(action="series_detail", series_name=series_name)})')
-    except Exception as e:
-        progress.close()
-        traceback.print_exc()
-        popinfo(f'Chyba: {str(e)}', icon=xbmcgui.NOTIFICATION_ERROR)
+
+        xbmc.executebuiltin(
+            f"Container.Update({get_url(action='series_detail', series_name=series_name)})"
+        )
+    except WebshareError as exc:
+        handle_webshare_error(exc)
         xbmcplugin.endOfDirectory(_handle, succeeded=False)
+    finally:
+        progress.close()
+
+
+ROUTES = {
+    "search": search,
+    "queue": queue,
+    "history": history,
+    "settings": settings,
+    "info": info,
+    "play": play,
+    "download": download,
+    "series": series_menu,
+    "series_search": series_search,
+    "series_detail": series_detail,
+    "series_season": series_season,
+    "series_refresh": series_refresh,
+}
+
 
 def router(paramstring):
     params = dict(parse_qsl(paramstring))
-    if params:
-        action = params.get('action')
-        if action == 'search':
-            search(params)
-        elif action == 'queue':
-            queue(params)
-        elif action == 'history':
-            history(params)
-        elif action == 'settings':
-            settings(params)
-        elif action == 'info':
-            info(params)
-        elif action == 'play':
-            play(params)
-        elif action == 'download':
-            download(params)
-        elif action == 'db':
-            db(params)
-        elif action == 'series':
-            series_menu(params)
-        elif action == 'series_search':
-            series_search(params)
-        elif action == 'series_detail':
-            series_detail(params)
-        elif action == 'series_season':
-            series_season(params)
-        elif action == 'series_refresh':
-            series_refresh(params)
-        else:
-            menu()
-    else:
+    action = params.get("action")
+
+    if not action:
         menu()
+        return
+
+    handler = ROUTES.get(action)
+    if handler is None:
+        log(f"Unknown route: {action}", xbmc.LOGWARNING)
+        menu()
+        return
+
+    try:
+        handler(params)
+    except WebshareApiError as exc:
+        handle_webshare_error(exc)
+    except Exception as exc:
+        log(f"Unhandled error in route {action}: {exc}", xbmc.LOGERROR)
+        traceback.print_exc()
+        popinfo(
+            _addon.getLocalizedString(30107),
+            icon=xbmcgui.NOTIFICATION_ERROR,
+        )
