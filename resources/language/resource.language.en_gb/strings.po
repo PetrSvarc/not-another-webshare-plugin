@@ -93,8 +93,8 @@ msgid "Password"
 msgstr "Password"
 
 msgctxt "#30040"
-msgid "Files download"
-msgstr "Files download"
+msgid "File downloads"
+msgstr "File downloads"
 
 msgctxt "#30041"
 msgid "Download folder"
