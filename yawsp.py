@@ -23,7 +23,12 @@ import xbmcaddon
 import xbmcvfs
 
 import series_manager
-from webshare_api import WebshareApiError, WebshareClient, WebshareError
+from webshare_api import (
+    WebshareApiError,
+    WebshareClient,
+    WebshareError,
+    WebshareTransportError,
+)
 
 
 CATEGORIES = ["", "video", "images", "audio", "archives", "docs", "adult"]
@@ -82,13 +87,16 @@ def login():
 
     try:
         token = _client.login(username, password)
-    except WebshareError as exc:
-        log(f"Login failed: {exc}", xbmc.LOGERROR)
+    except WebshareApiError as exc:
+        log(f"Login rejected by Webshare: {exc}", xbmc.LOGWARNING)
         popinfo(
             _addon.getLocalizedString(30102),
             icon=xbmcgui.NOTIFICATION_ERROR,
             sound=True,
         )
+        return None
+    except WebshareTransportError as exc:
+        handle_webshare_error(exc)
         return None
 
     _addon.setSetting("token", token)
