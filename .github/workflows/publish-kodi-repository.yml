@@ -10,6 +10,8 @@ on:
       - "scripts/build_kodi_repository.py"
       - ".github/workflows/publish-kodi-repository.yml"
   push:
+    tags:
+      - "v*"
     branches:
       - main
     paths:
@@ -22,7 +24,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -43,7 +45,6 @@ jobs:
           python-version: "3.12"
 
       - name: Verify release tag matches add-on version
-        id: release
         shell: bash
         env:
           INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
@@ -55,7 +56,9 @@ jobs:
           )"
 
           RELEASE_TAG=""
-          if [ -n "${INPUT_RELEASE_TAG}" ]; then
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          elif [ -n "${INPUT_RELEASE_TAG}" ]; then
             RELEASE_TAG="${INPUT_RELEASE_TAG}"
           elif [ -f .github/publish-request ]; then
             RELEASE_TAG="$(tr -d '[:space:]' < .github/publish-request)"
@@ -72,38 +75,14 @@ jobs:
             fi
           fi
 
-          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Download archived plugin versions
-        if: github.event_name != 'pull_request'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p release-archive
-          while IFS= read -r tag; do
-            [ -n "${tag}" ] || continue
-            if gh release view "${tag}" --json assets --jq '.assets[].name' | grep -Eq '^plugin\.video\.nawsp-[0-9]+\.[0-9]+\.[0-9]+\.zip$'; then
-              gh release download "${tag}" \
-                --pattern 'plugin.video.nawsp-*.zip' \
-                --dir release-archive \
-                --clobber
-            fi
-          done < <(
-            gh release list --limit 100 --json tagName,isDraft,isPrerelease \
-              --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName'
-          )
-
       - name: Build Kodi repository
-        run: python scripts/build_kodi_repository.py --output site --archive-dir release-archive
+        run: python scripts/build_kodi_repository.py --output site
 
       - name: Validate generated repository
         shell: bash
         run: |
           python - <<'PY'
           import hashlib
-          import re
           import zipfile
           from pathlib import Path
           from xml.etree import ElementTree as ET
@@ -117,10 +96,7 @@ jobs:
           actual = (site / 'addons.xml.md5').read_text(encoding='ascii').strip()
           assert actual == expected, (actual, expected)
 
-          current_version = ET.parse('addon.xml').getroot().get('version')
-          plugin_dir = site / 'zips' / 'plugin.video.nawsp'
-          plugin_zip = plugin_dir / f'plugin.video.nawsp-{current_version}.zip'
-          assert plugin_zip.is_file(), plugin_zip
+          plugin_zip = next((site / 'zips' / 'plugin.video.nawsp').glob('*.zip'))
           with zipfile.ZipFile(plugin_zip) as archive:
               names = archive.namelist()
               assert 'plugin.video.nawsp/addon.xml' in names
@@ -130,18 +106,6 @@ jobs:
               assert 'plugin.video.nawsp/search_results_ui.py' in names
               assert all(name.startswith('plugin.video.nawsp/') for name in names)
 
-          archive_index = (plugin_dir / 'index.html').read_text(encoding='utf-8')
-          assert plugin_zip.name in archive_index
-
-          pattern = re.compile(r'^plugin\.video\.nawsp-(\d+\.\d+\.\d+)\.zip$')
-          for archived_zip in plugin_dir.glob('*.zip'):
-              match = pattern.fullmatch(archived_zip.name)
-              assert match, archived_zip.name
-              with zipfile.ZipFile(archived_zip) as archive:
-                  manifest = ET.fromstring(archive.read('plugin.video.nawsp/addon.xml'))
-              assert manifest.get('id') == 'plugin.video.nawsp'
-              assert manifest.get('version') == match.group(1)
-
           repository_zip = next((site / 'zips' / 'repository.nawsp').glob('*.zip'))
           with zipfile.ZipFile(repository_zip) as archive:
               assert 'repository.nawsp/addon.xml' in archive.namelist()
@@ -149,18 +113,6 @@ jobs:
           assert (site / repository_zip.name).is_file()
           print('Kodi repository validation passed')
           PY
-
-      - name: Archive current plugin ZIP on GitHub Release
-        if: github.event_name != 'pull_request' && steps.release.outputs.release_tag != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
-          VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          gh release upload "${RELEASE_TAG}" \
-            "site/zips/plugin.video.nawsp/plugin.video.nawsp-${VERSION}.zip" \
-            --clobber
 
       - name: Configure GitHub Pages
         if: github.event_name != 'pull_request'
