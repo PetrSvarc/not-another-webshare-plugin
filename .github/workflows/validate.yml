@@ -18,9 +18,9 @@ jobs:
         python-version: ["3.9", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -28,7 +28,10 @@ jobs:
         run: python -m pip install --disable-pip-version-check "requests>=2.31,<3"
 
       - name: Compile Python sources
-        run: python -m compileall -q main.py yawsp.py webshare_api.py series_manager.py md5crypt.py tests
+        run: >-
+          python -m compileall -q
+          main.py yawsp.py webshare_api.py series_manager.py md5crypt.py
+          media_results.py search_results_ui.py scripts/set_release_version.py tests
 
       - name: Run API client tests
         run: python -m unittest discover -s tests -v
