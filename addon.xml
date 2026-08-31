@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon id="plugin.video.nawsp" name="Not Another WebShare Plugin" version="0.3.0" provider-name="PetrSvarc; based on cache-sk YAWSP and community extensions">
+    <requires>
+        <import addon="xbmc.python" version="3.0.0"/>
+        <import addon="script.module.requests" version="2.18.4"/>
+        <import addon="script.module.unidecode" version="0.4.16"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="main.py">
+        <provides>video</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>Not Another WebShare Plugin</summary>
+        <description>A Kodi client for browsing, searching and playing files available through Webshare.cz. Forked from Yet Another Webshare Plugin (YAWSP).</description>
+        <disclaimer lang="en_GB">The plugin does not provide or host content. It acts as a client for Webshare. Users are responsible for the content they access.</disclaimer>
+        <disclaimer lang="sk_SK">Plugin neposkytuje ani nehostuje obsah. Funguje ako klient služby Webshare. Používateľ zodpovedá za obsah, ku ktorému pristupuje.</disclaimer>
+        <disclaimer lang="cs_CZ">Plugin neposkytuje ani nehostuje obsah. Funguje jako klient služby Webshare. Uživatel odpovídá za obsah, ke kterému přistupuje.</disclaimer>
+        <platform>all</platform>
+        <license>AGPL-3.0</license>
+        <source>https://github.com/PetrSvarc/not-another-webshare-plugin</source>
+        <news>
+[B]0.3.0 NAWSP fork[/B]
+- renamed project and Kodi add-on identity to Not Another WebShare Plugin / plugin.video.nawsp
+- preserved YAWSP 0.3.0 Webshare functionality and series manager
+- updated source, provider and attribution metadata
+        </news>
+    </extension>
+</addon>
