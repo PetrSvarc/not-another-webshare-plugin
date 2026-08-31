@@ -28,6 +28,7 @@ PLUGIN_ROOT_FILES = (
     "webshare_api.py",
     "download_utils.py",
     "media_results.py",
+    "search_results_ui.py",
 )
 PLUGIN_DIRECTORIES = ("resources",)
 FIXED_ZIP_DATE = (2020, 1, 1, 0, 0, 0)
