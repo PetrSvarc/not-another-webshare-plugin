@@ -85,6 +85,10 @@ class WebshareClient:
             ) from exc
 
         status = root.findtext("status")
+        if not status:
+            raise WebshareTransportError(
+                f"Webshare response for {endpoint} did not contain a status"
+            )
         if status != "OK":
             raise WebshareApiError(
                 endpoint=endpoint,
