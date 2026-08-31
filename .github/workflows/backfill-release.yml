@@ -1,0 +1,188 @@
+name: Backfill NAWSP release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Historical version to backfill (for example 0.4.0)"
+        required: true
+        type: string
+      commit:
+        description: "Commit SHA containing that exact add-on version"
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/backfill-request"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: nawsp-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve backfill request
+        id: request
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_COMMIT: ${{ inputs.commit }}
+        run: |
+          if [ -n "${INPUT_VERSION}" ] && [ -n "${INPUT_COMMIT}" ]; then
+            VERSION="${INPUT_VERSION}"
+            COMMIT="${INPUT_COMMIT}"
+          else
+            VERSION="$(sed -n 's/^version=//p' .github/backfill-request | head -n1 | tr -d '[:space:]')"
+            COMMIT="$(sed -n 's/^commit=//p' .github/backfill-request | head -n1 | tr -d '[:space:]')"
+          fi
+
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: ${VERSION}" >&2
+            exit 1
+          fi
+          if ! [[ "${COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Invalid commit SHA: ${COMMIT}" >&2
+            exit 1
+          fi
+          git cat-file -e "${COMMIT}^{commit}"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify historical manifest
+        shell: bash
+        env:
+          VERSION: ${{ steps.request.outputs.version }}
+          COMMIT: ${{ steps.request.outputs.commit }}
+        run: |
+          git show "${COMMIT}:addon.xml" > historical-addon.xml
+          ACTUAL="$(python - <<'PY'
+          from xml.etree import ElementTree as ET
+          print(ET.parse('historical-addon.xml').getroot().get('version'))
+          PY
+          )"
+          if [ "${ACTUAL}" != "${VERSION}" ]; then
+            echo "Historical commit contains version ${ACTUAL}, expected ${VERSION}" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists" >&2
+            exit 1
+          fi
+
+      - name: Build historical plugin ZIP
+        shell: bash
+        env:
+          VERSION: ${{ steps.request.outputs.version }}
+          COMMIT: ${{ steps.request.outputs.commit }}
+        run: |
+          rm -rf historical-src dist
+          mkdir -p historical-src dist
+          git archive "${COMMIT}" | tar -x -C historical-src
+
+          python - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+
+          version = os.environ['VERSION']
+          source = Path('historical-src')
+          output = Path('dist') / f'plugin.video.nawsp-{version}.zip'
+          addon_id = 'plugin.video.nawsp'
+          root_files = (
+              'addon.xml',
+              'LICENSE',
+              'main.py',
+              'md5crypt.py',
+              'series_manager.py',
+              'yawsp.py',
+              'webshare_api.py',
+              'download_utils.py',
+          )
+          fixed_date = (2020, 1, 1, 0, 0, 0)
+
+          def add_bytes(archive, name, data):
+              info = zipfile.ZipInfo(name, fixed_date)
+              info.compress_type = zipfile.ZIP_DEFLATED
+              info.external_attr = 0o644 << 16
+              archive.writestr(info, data)
+
+          with zipfile.ZipFile(output, 'w') as archive:
+              for relative in root_files:
+                  path = source / relative
+                  if not path.is_file():
+                      raise FileNotFoundError(path)
+                  add_bytes(archive, f'{addon_id}/{relative}', path.read_bytes())
+
+              resources = source / 'resources'
+              for path in sorted(p for p in resources.rglob('*') if p.is_file()):
+                  relative = path.relative_to(source).as_posix()
+                  add_bytes(archive, f'{addon_id}/{relative}', path.read_bytes())
+
+          with zipfile.ZipFile(output) as archive:
+              manifest = ET.fromstring(archive.read(f'{addon_id}/addon.xml'))
+              assert manifest.get('id') == addon_id
+              assert manifest.get('version') == version
+              assert f'{addon_id}/webshare_api.py' in archive.namelist()
+              assert f'{addon_id}/download_utils.py' in archive.namelist()
+
+          print(output)
+          PY
+
+      - name: Create historical tag and GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.request.outputs.version }}
+          COMMIT: ${{ steps.request.outputs.commit }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" "${COMMIT}" -m "NAWSP ${VERSION}"
+          git push origin "v${VERSION}"
+          gh release create "v${VERSION}" \
+            "dist/plugin.video.nawsp-${VERSION}.zip" \
+            --verify-tag \
+            --title "NAWSP ${VERSION}" \
+            --notes "Historical NAWSP ${VERSION} release backfilled from commit ${COMMIT}."
+
+      - name: Refresh current Kodi repository archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CURRENT_VERSION="$(python - <<'PY'
+          from xml.etree import ElementTree as ET
+          print(ET.parse('addon.xml').getroot().get('version'))
+          PY
+          )"
+          CURRENT_TAG="v${CURRENT_VERSION}"
+          gh release view "${CURRENT_TAG}" >/dev/null
+          gh workflow run publish-kodi-repository.yml --ref main -f "release_tag=${CURRENT_TAG}"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.request.outputs.version }}
+          COMMIT: ${{ steps.request.outputs.commit }}
+        run: |
+          echo "## Backfilled NAWSP ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Created historical tag \`v${VERSION}\` at \`${COMMIT}\`, attached its Kodi ZIP, and dispatched a Pages archive refresh." >> "$GITHUB_STEP_SUMMARY"
