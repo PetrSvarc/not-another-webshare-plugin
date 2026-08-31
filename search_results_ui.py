@@ -136,7 +136,7 @@ def _add_single_result(app, item, queue_command=None, label=None, label2=None):
             listitem.setLabel2(label2)
         if item.get("img"):
             listitem.setArt({"thumb": item["img"]})
-        listitem.setInfo("video", {"title": item.get("name", label)})
+        listitem.setInfo("video", {"title": label})
         listitem.setProperty("IsPlayable", "true")
 
         ident = item.get("ident")
@@ -338,14 +338,11 @@ def versions(app, params):
 def install(app):
     """Install grouped-search rendering into the existing NAWSP router."""
 
-    app.dosearch = lambda token, what, category, sort, limit, offset, action: dosearch(
-        app,
-        token,
-        what,
-        category,
-        sort,
-        limit,
-        offset,
-        action,
-    )
-    app.ROUTES["versions"] = lambda params: versions(app, params)
+    def grouped_search(token, what, category, sort, limit, offset, action):
+        return dosearch(app, token, what, category, sort, limit, offset, action)
+
+    def versions_route(params):
+        return versions(app, params)
+
+    app.dosearch = grouped_search
+    app.ROUTES["versions"] = versions_route
