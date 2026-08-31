@@ -1,0 +1,116 @@
+name: Publish Kodi repository
+
+on:
+  pull_request:
+    paths:
+      - "repository.nawsp/**"
+      - "scripts/build_kodi_repository.py"
+      - ".github/workflows/publish-kodi-repository.yml"
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "repository.nawsp/**"
+      - "scripts/build_kodi_repository.py"
+      - ".github/workflows/publish-kodi-repository.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kodi-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify release tag matches add-on version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          from xml.etree import ElementTree as ET
+          print(ET.parse('addon.xml').getroot().get('version'))
+          PY
+          )"
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match addon.xml version v${VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Build Kodi repository
+        run: python scripts/build_kodi_repository.py --output site
+
+      - name: Validate generated repository
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import zipfile
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+
+          site = Path('site')
+          addons = ET.parse(site / 'addons.xml').getroot()
+          ids = {addon.get('id') for addon in addons.findall('addon')}
+          assert {'plugin.video.nawsp', 'repository.nawsp'} <= ids, ids
+
+          expected = hashlib.md5((site / 'addons.xml').read_bytes()).hexdigest()
+          actual = (site / 'addons.xml.md5').read_text(encoding='ascii').strip()
+          assert actual == expected, (actual, expected)
+
+          plugin_zip = next((site / 'zips' / 'plugin.video.nawsp').glob('*.zip'))
+          with zipfile.ZipFile(plugin_zip) as archive:
+              names = archive.namelist()
+              assert 'plugin.video.nawsp/addon.xml' in names
+              assert 'plugin.video.nawsp/webshare_api.py' in names
+              assert 'plugin.video.nawsp/download_utils.py' in names
+              assert all(name.startswith('plugin.video.nawsp/') for name in names)
+
+          repository_zip = next((site / 'zips' / 'repository.nawsp').glob('*.zip'))
+          with zipfile.ZipFile(repository_zip) as archive:
+              assert 'repository.nawsp/addon.xml' in archive.namelist()
+
+          assert (site / repository_zip.name).is_file()
+          print('Kodi repository validation passed')
+          PY
+
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request'
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
