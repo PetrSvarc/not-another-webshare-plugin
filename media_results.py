@@ -284,11 +284,13 @@ def _rank_key(version: MediaVersion):
         size = int(item.get("size") or 0)
     except (TypeError, ValueError):
         size = 0
+    size_unknown = size <= 0
     return (
         -version.score,
         -votes,
         -resolution,
-        size,
+        size_unknown,
+        size if not size_unknown else 0,
         str(item.get("name") or "").casefold(),
         str(item.get("ident") or ""),
     )
