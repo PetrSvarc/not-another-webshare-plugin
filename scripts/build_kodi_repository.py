@@ -7,6 +7,7 @@ import argparse
 import copy
 import hashlib
 import html
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -32,6 +33,7 @@ PLUGIN_ROOT_FILES = (
 )
 PLUGIN_DIRECTORIES = ("resources",)
 FIXED_ZIP_DATE = (2020, 1, 1, 0, 0, 0)
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
 def parse_manifest(path: Path) -> ET.Element:
@@ -91,6 +93,72 @@ def build_repository_zip(output: Path, addon_id: str, version: str) -> Path:
     return destination
 
 
+def version_from_plugin_zip(path: Path, addon_id: str) -> str | None:
+    prefix = f"{addon_id}-"
+    if not path.name.startswith(prefix) or not path.name.endswith(".zip"):
+        return None
+    version = path.name[len(prefix) : -4]
+    return version if SEMVER_RE.fullmatch(version) else None
+
+
+def version_sort_key(version: str) -> tuple[int, int, int]:
+    match = SEMVER_RE.fullmatch(version)
+    if not match:
+        raise ValueError(f"Unsupported release version: {version}")
+    return tuple(int(part) for part in match.groups())
+
+
+def validate_archived_plugin_zip(path: Path, addon_id: str, version: str) -> None:
+    manifest_path = f"{addon_id}/addon.xml"
+    try:
+        with zipfile.ZipFile(path) as archive:
+            manifest = ET.fromstring(archive.read(manifest_path))
+    except (KeyError, zipfile.BadZipFile, ET.ParseError) as exc:
+        raise ValueError(f"Invalid archived plugin ZIP: {path}") from exc
+
+    if manifest.tag != "addon":
+        raise ValueError(f"Archived ZIP has invalid add-on manifest: {path}")
+    if manifest.get("id") != addon_id or manifest.get("version") != version:
+        raise ValueError(
+            f"Archived ZIP metadata does not match filename {path.name}: "
+            f"id={manifest.get('id')!r}, version={manifest.get('version')!r}"
+        )
+
+
+def copy_archived_plugin_zips(output: Path, addon_id: str, archive_dir: Path | None) -> list[Path]:
+    if archive_dir is None or not archive_dir.is_dir():
+        return []
+
+    destination_dir = output / "zips" / addon_id
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    copied = []
+
+    for source in sorted(path for path in archive_dir.glob("*.zip") if path.is_file()):
+        version = version_from_plugin_zip(source, addon_id)
+        if version is None:
+            continue
+        validate_archived_plugin_zip(source, addon_id, version)
+
+        destination = destination_dir / source.name
+        if destination.exists():
+            # The freshly-built current release wins over an archived copy of the same version.
+            continue
+        shutil.copy2(source, destination)
+        copied.append(destination)
+
+    return copied
+
+
+def available_plugin_versions(output: Path, addon_id: str) -> list[tuple[str, Path]]:
+    plugin_dir = output / "zips" / addon_id
+    versions = []
+    for path in plugin_dir.glob("*.zip"):
+        version = version_from_plugin_zip(path, addon_id)
+        if version is not None:
+            versions.append((version, path))
+    return sorted(versions, key=lambda item: version_sort_key(item[0]), reverse=True)
+
+
 def write_repository_metadata(
     output: Path,
     plugin_manifest: ET.Element,
@@ -113,9 +181,42 @@ def write_repository_metadata(
     (output / "addons.xml.md5").write_text(digest + "\n", encoding="ascii")
 
 
+def write_plugin_archive_index(output: Path, plugin_id: str, current_version: str) -> Path:
+    plugin_dir = output / "zips" / plugin_id
+    versions = available_plugin_versions(output, plugin_id)
+    items = []
+    for version, path in versions:
+        suffix = " (current)" if version == current_version else ""
+        items.append(
+            f'    <li><a href="{html.escape(path.name)}">'
+            f'{html.escape(plugin_id)} {html.escape(version)}{suffix}</a></li>'
+        )
+
+    page = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NAWSP plugin versions</title>
+</head>
+<body>
+  <h1>NAWSP plugin versions</h1>
+  <p>The Kodi repository metadata advertises the newest version. Older ZIPs are retained here for manual rollback and testing.</p>
+  <ul>
+{chr(10).join(items)}
+  </ul>
+</body>
+</html>
+"""
+    index_path = plugin_dir / "index.html"
+    index_path.write_text(page, encoding="utf-8")
+    return index_path
+
+
 def write_index(output: Path, repository_zip: Path, plugin_id: str, plugin_version: str) -> None:
     repo_zip_name = html.escape(repository_zip.name)
     plugin_label = html.escape(f"{plugin_id} {plugin_version}")
+    archive_href = html.escape(f"zips/{plugin_id}/")
     page = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -128,6 +229,7 @@ def write_index(output: Path, repository_zip: Path, plugin_id: str, plugin_versi
   <p>Install the repository ZIP in Kodi, then install Not Another WebShare Plugin from the NAWSP Repository.</p>
   <ul>
     <li><a href="{repo_zip_name}">{repo_zip_name}</a></li>
+    <li><a href="{archive_href}">Previous plugin versions</a></li>
     <li><a href="addons.xml">addons.xml</a></li>
     <li><a href="addons.xml.md5">addons.xml.md5</a></li>
   </ul>
@@ -139,7 +241,7 @@ def write_index(output: Path, repository_zip: Path, plugin_id: str, plugin_versi
     (output / ".nojekyll").write_text("", encoding="utf-8")
 
 
-def build(output: Path) -> None:
+def build(output: Path, archive_dir: Path | None = None) -> None:
     plugin_manifest = parse_manifest(PLUGIN_MANIFEST)
     repository_manifest = parse_manifest(REPOSITORY_MANIFEST)
 
@@ -155,11 +257,14 @@ def build(output: Path) -> None:
 
     plugin_zip = build_plugin_zip(output, plugin_id, plugin_version)
     repository_zip = build_repository_zip(output, repository_id, repository_version)
+    archived = copy_archived_plugin_zips(output, plugin_id, archive_dir)
     write_repository_metadata(output, plugin_manifest, repository_manifest)
+    write_plugin_archive_index(output, plugin_id, plugin_version)
     write_index(output, repository_zip, plugin_id, plugin_version)
 
     print(f"Built {plugin_zip.relative_to(output)}")
     print(f"Built {repository_zip.relative_to(output)}")
+    print(f"Retained {len(archived)} archived plugin version(s)")
     print(f"Bootstrap ZIP: {repository_zip.name}")
 
 
@@ -171,8 +276,14 @@ def main() -> None:
         default=ROOT / "site",
         help="Directory to build (default: ./site)",
     )
+    parser.add_argument(
+        "--archive-dir",
+        type=Path,
+        help="Optional directory containing previously published plugin ZIPs to retain",
+    )
     args = parser.parse_args()
-    build(args.output.resolve())
+    archive_dir = args.archive_dir.resolve() if args.archive_dir else None
+    build(args.output.resolve(), archive_dir)
 
 
 if __name__ == "__main__":
