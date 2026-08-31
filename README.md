@@ -36,7 +36,7 @@ NAWSP separates Kodi UI concerns from Webshare communication and keeps filename 
 - `search_results_ui.py` — Kodi grouped-search and versions-view integration.
 - `series_manager.py` — series discovery, local series metadata and season/episode menus.
 - `md5crypt.py` — historical password-digest helper retained from upstream.
-- `tests/` — API-client, media parsing/ranking and repository-builder regression tests.
+- `tests/` — API-client and media parsing/ranking regression tests.
 
 This separation makes Webshare request behavior and media matching/ranking testable without importing Kodi modules.
 
@@ -98,32 +98,14 @@ In Kodi:
 
 The repository add-on ID is `repository.nawsp`.
 
-## Previous versions and rollback
-
-Kodi repository metadata advertises the newest NAWSP version. Older packages are therefore retained separately for reliable rollback and regression testing.
-
-Every published NAWSP ZIP is attached to its GitHub Release and is copied into the GitHub Pages repository under:
-
-`zips/plugin.video.nawsp/`
-
-The root Pages source exposes this directory as **Previous plugin versions**. To install an older release in Kodi:
-
-1. Open **Add-ons → Install from zip file → NAWSP**.
-2. Open **Previous plugin versions**.
-3. Select the desired `plugin.video.nawsp-X.Y.Z.zip`.
-
-Kodi may also offer locally cached older packages through the add-on **Versions** dialog. The Pages archive is the durable fallback when that local cache is not available.
-
 ## Publishing releases
 
 `scripts/build_kodi_repository.py` builds the static Kodi repository used by GitHub Pages. It creates:
 
 - `addons.xml` and `addons.xml.md5`;
-- the current `zips/plugin.video.nawsp/plugin.video.nawsp-X.Y.Z.zip`;
-- retained historical plugin ZIPs under the same directory;
+- `zips/plugin.video.nawsp/plugin.video.nawsp-X.Y.Z.zip`;
 - `zips/repository.nawsp/repository.nawsp-X.Y.Z.zip`;
-- a root-level repository ZIP used for the one-time Kodi File Manager bootstrap;
-- an HTML index for browsing retained plugin versions.
+- a root-level repository ZIP used for the one-time Kodi File Manager bootstrap.
 
 Normal releases are handled by the **Release NAWSP** GitHub Actions workflow. From **Actions → Release NAWSP → Run workflow**, enter a semantic version such as `0.6.0`. The workflow then:
 
@@ -132,9 +114,9 @@ Normal releases are handled by the **Release NAWSP** GitHub Actions workflow. Fr
 3. commits the release metadata to `main`;
 4. creates the matching tag, for example `v0.6.0`;
 5. creates a GitHub Release with generated notes;
-6. dispatches the Kodi repository publisher from `main`, passing the release tag for verification.
+6. explicitly dispatches the Kodi repository publisher on that tag.
 
-The **Publish Kodi repository** workflow verifies that the requested tag matches the add-on version and exists, downloads previously archived release ZIPs, builds the current Kodi ZIP, attaches it to the GitHub Release, rebuilds the repository with all retained versions, and deploys the result to GitHub Pages. Kodi can then discover the newest version through `repository.nawsp`, while older ZIPs remain available for rollback.
+The **Publish Kodi repository** workflow verifies that the tag matches the add-on version, builds the Kodi ZIPs and repository metadata, and deploys them to GitHub Pages. Kodi can then discover the new version through `repository.nawsp`.
 
 For automated/bootstrap releases, changing `.github/release-request` on `main` triggers the same release workflow using the version stored in that file. Normal feature merges do not publish a Kodi release.
 
@@ -144,7 +126,7 @@ Open the add-on settings in Kodi and enter your Webshare account credentials. Th
 
 ## Upstream and attribution
 
-This fork derives from **Yet Another WebShare Plugin (YAWSP)**, originally authored by `cache-sk`, with later community/user extensions. Historical source metadata references `https://github.com/cache-sk/plugin.video.yawsp`; Kodi repository packaging is available at `https://github.com/lukyno999/yaws-repo`.
+This fork derives from **Yet Another Webshare Plugin (YAWSP)**, originally authored by `cache-sk`, with later community/user extensions. Historical source metadata references `https://github.com/cache-sk/plugin.video.yawsp`; Kodi repository packaging is available at `https://github.com/lukyno999/yaws-repo`.
 
 Original author and license headers are retained in the source files. Changes made for this fork are clearly marked.
 
