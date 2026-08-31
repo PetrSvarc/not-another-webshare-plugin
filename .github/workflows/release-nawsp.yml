@@ -1,0 +1,111 @@
+name: Release NAWSP
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (for example 0.6.0)"
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/release-request"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: nawsp-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "${INPUT_VERSION}" ]; then
+            VERSION="${INPUT_VERSION}"
+          else
+            VERSION="$(tr -d '[:space:]' < .github/release-request)"
+          fi
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version: ${VERSION}" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tag does not already exist
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists" >&2
+            exit 1
+          fi
+
+      - name: Update release version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python scripts/set_release_version.py "${VERSION}"
+
+      - name: Commit release metadata
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add addon.xml README.md
+          if git diff --cached --quiet; then
+            echo "No release metadata changes required"
+          else
+            git commit -m "release: NAWSP ${VERSION}"
+            git push origin HEAD:main
+          fi
+
+      - name: Create tag and GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git tag -a "v${VERSION}" -m "NAWSP ${VERSION}"
+          git push origin "v${VERSION}"
+          gh release create "v${VERSION}" \
+            --verify-tag \
+            --title "NAWSP ${VERSION}" \
+            --generate-notes
+
+      - name: Publish Kodi repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh workflow run publish-kodi-repository.yml --ref "v${VERSION}"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "## NAWSP ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Created release tag \`v${VERSION}\` and dispatched the Kodi repository publisher." >> "$GITHUB_STEP_SUMMARY"
