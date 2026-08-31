@@ -3,18 +3,15 @@ name: Publish Kodi repository
 on:
   pull_request:
     paths:
+      - "addon.xml"
+      - "*.py"
+      - "resources/**"
       - "repository.nawsp/**"
       - "scripts/build_kodi_repository.py"
       - ".github/workflows/publish-kodi-repository.yml"
   push:
-    branches:
-      - main
     tags:
       - "v*"
-    paths:
-      - "repository.nawsp/**"
-      - "scripts/build_kodi_repository.py"
-      - ".github/workflows/publish-kodi-repository.yml"
   workflow_dispatch:
 
 permissions:
@@ -79,6 +76,8 @@ jobs:
               assert 'plugin.video.nawsp/addon.xml' in names
               assert 'plugin.video.nawsp/webshare_api.py' in names
               assert 'plugin.video.nawsp/download_utils.py' in names
+              assert 'plugin.video.nawsp/media_results.py' in names
+              assert 'plugin.video.nawsp/search_results_ui.py' in names
               assert all(name.startswith('plugin.video.nawsp/') for name in names)
 
           repository_zip = next((site / 'zips' / 'repository.nawsp').glob('*.zip'))

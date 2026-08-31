@@ -6,7 +6,13 @@
 # Modified for Not Another WebShare Plugin (NAWSP), 2026-08-31.
 
 import sys
+
+import search_results_ui
 import yawsp
+
+
+search_results_ui.install(yawsp)
+
 
 if __name__ == '__main__':
     yawsp.router(sys.argv[2][1:])

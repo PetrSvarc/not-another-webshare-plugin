@@ -112,6 +112,54 @@ msgctxt "#30044"
 msgid "Notify every"
 msgstr "Oznámit každých"
 
+msgctxt "#30050"
+msgid "Media matching"
+msgstr "Párování médií"
+
+msgctxt "#30051"
+msgid "Preferred language"
+msgstr "Preferovaný jazyk"
+
+msgctxt "#30052"
+msgid "Any"
+msgstr "Libovolný"
+
+msgctxt "#30053"
+msgid "Czech"
+msgstr "Čeština"
+
+msgctxt "#30054"
+msgid "Slovak"
+msgstr "Slovenština"
+
+msgctxt "#30055"
+msgid "English"
+msgstr "Angličtina"
+
+msgctxt "#30056"
+msgid "Preferred quality"
+msgstr "Preferovaná kvalita"
+
+msgctxt "#30057"
+msgid "2160p"
+msgstr "2160p"
+
+msgctxt "#30058"
+msgid "1080p"
+msgstr "1080p"
+
+msgctxt "#30059"
+msgid "720p"
+msgstr "720p"
+
+msgctxt "#30060"
+msgid "Prefer HEVC"
+msgstr "Preferovat HEVC"
+
+msgctxt "#30061"
+msgid "Hide password-protected files"
+msgstr "Skrýt soubory chráněné heslem"
+
 msgctxt "#30101"
 msgid "To use this plugin, you must enter Webshare account in the settings."
 msgstr "Pro použití tohoto pluginu je nutné zadat v nastavení účet Webshare."
@@ -259,3 +307,11 @@ msgstr "Data sezóny nebyla nalezena"
 msgctxt "#30411"
 msgid "Episode {} - {}"
 msgstr "Epizoda {} - {}"
+
+msgctxt "#30501"
+msgid "{} — {} versions"
+msgstr "{} — {} verzí"
+
+msgctxt "#30502"
+msgid "Best match"
+msgstr "Nejlepší shoda"
