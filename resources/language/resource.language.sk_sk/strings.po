@@ -98,7 +98,7 @@ msgstr "Sťahovanie súborov"
 
 msgctxt "#30041"
 msgid "Download folder"
-msgstr "Adresár kam stiahnuť"
+msgstr "Adresár pre sťahovanie"
 
 msgctxt "#30042"
 msgid "Normalize filename"
@@ -111,10 +111,6 @@ msgstr "Oznamovať priebeh"
 msgctxt "#30044"
 msgid "Notify every"
 msgstr "Notifikovať každých"
-
-msgctxt "#30051"
-msgid "Experimental functions"
-msgstr "Experimentálne funkcie"
 
 msgctxt "#30101"
 msgid "To use this plugin, you must enter Webshare account in the settings."
@@ -143,6 +139,10 @@ msgstr "Súbor bol odstránený z fronty."
 msgctxt "#30107"
 msgid "An error occurred while communicating with the Webshare API."
 msgstr "Vznikla chyba pri komunikácii s Webshare API."
+
+msgctxt "#30108"
+msgid "Select a valid download folder in Settings."
+msgstr "V nastaveniach vyberte platný adresár pre sťahovanie."
 
 msgctxt "#30201"
 msgid "Search"
@@ -215,3 +215,47 @@ msgstr "Sťahovanie dokončené - "
 msgctxt "#30304"
 msgid "Unknown error - "
 msgstr "Neznáma chyba - "
+
+msgctxt "#30401"
+msgid "Series"
+msgstr "Seriály"
+
+msgctxt "#30402"
+msgid "Search for a new series"
+msgstr "Vyhľadať nový seriál"
+
+msgctxt "#30403"
+msgid "Series data not found"
+msgstr "Dáta seriálu sa nenašli"
+
+msgctxt "#30404"
+msgid "Refresh series"
+msgstr "Aktualizovať seriál"
+
+msgctxt "#30405"
+msgid "Searching for series: {}"
+msgstr "Vyhľadávam seriál: {}"
+
+msgctxt "#30406"
+msgid "No episodes found for this series"
+msgstr "Pre tento seriál sa nenašli žiadne epizódy"
+
+msgctxt "#30407"
+msgid "Found {} episodes in {} seasons"
+msgstr "Nájdených {} epizód v {} sezónach"
+
+msgctxt "#30408"
+msgid "Season {}"
+msgstr "Séria {}"
+
+msgctxt "#30409"
+msgid "Refreshing series: {}"
+msgstr "Aktualizujem seriál: {}"
+
+msgctxt "#30410"
+msgid "Season data not found"
+msgstr "Dáta sezóny sa nenašli"
+
+msgctxt "#30411"
+msgid "Episode {} - {}"
+msgstr "Epizóda {} - {}"
