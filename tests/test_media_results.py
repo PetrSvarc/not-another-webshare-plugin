@@ -38,6 +38,25 @@ class MediaParsingTests(unittest.TestCase):
         self.assertTrue(groups[0].grouped)
         self.assertEqual(groups[0].best.media.display_title, "The Bear — S03E01")
 
+    def test_year_named_series_remains_groupable(self):
+        items = [
+            {"ident": "a", "name": "1923.S01E01.1080p.CZ.mkv"},
+            {"ident": "b", "name": "1923.1x01.720p.EN.mkv"},
+        ]
+
+        group = group_results(items, MediaPreferences())[0]
+
+        self.assertTrue(group.grouped)
+        self.assertEqual(group.best.media.display_title, "1923 — S01E01")
+
+    def test_movie_title_that_is_a_year_uses_last_year_as_release_year(self):
+        parsed = parse_media("1917.2019.1080p.CZ.mkv")
+
+        self.assertEqual(parsed.kind, "movie")
+        self.assertEqual(parsed.title, "1917")
+        self.assertEqual(parsed.year, 2019)
+        self.assertEqual(parsed.display_title, "1917 (2019)")
+
     def test_ambiguous_filename_remains_individual(self):
         parsed = parse_media("Random.File.Without.Year.1080p.mkv")
 
