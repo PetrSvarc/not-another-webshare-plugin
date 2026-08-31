@@ -9,7 +9,7 @@ This project is an independently maintained fork of **Yet Another Webshare Plugi
 - **Name:** Not Another WebShare Plugin
 - **ID:** `plugin.video.nawsp`
 - **Short name:** NAWSP
-- **Current version:** 0.5.0
+- **Current version:** 0.5.1
 - **Kodi runtime:** Python 3 (`xbmc.python` 3.0.0+)
 - **License:** GNU Affero General Public License v3.0
 
