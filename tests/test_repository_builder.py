@@ -74,7 +74,26 @@ class RepositoryArchiveTests(unittest.TestCase):
 
             self.assertLess(content.index("0.5.1"), content.index("0.5.0"))
             self.assertLess(content.index("0.5.0"), content.index("0.4.0"))
-            self.assertIn("0.5.1 (current)", content)
+            self.assertIn("plugin.video.nawsp-0.5.1.zip (current)", content)
+
+    def test_root_index_links_all_plugin_versions_directly(self):
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp) / "site"
+            plugin_dir = output / "zips" / "plugin.video.nawsp"
+            plugin_dir.mkdir(parents=True)
+            self._write_plugin_zip(plugin_dir, "0.4.0")
+            self._write_plugin_zip(plugin_dir, "0.5.1")
+
+            repository_zip = output / "repository.nawsp-1.0.0.zip"
+            repository_zip.write_bytes(b"test")
+            builder.write_index(output, repository_zip, "plugin.video.nawsp", "0.5.1")
+            content = (output / "index.html").read_text(encoding="utf-8")
+
+            current = "zips/plugin.video.nawsp/plugin.video.nawsp-0.5.1.zip"
+            previous = "zips/plugin.video.nawsp/plugin.video.nawsp-0.4.0.zip"
+            self.assertIn(f'href="{current}"', content)
+            self.assertIn(f'href="{previous}"', content)
+            self.assertLess(content.index(current), content.index(previous))
 
 
 if __name__ == "__main__":
