@@ -65,9 +65,41 @@ python -m pip install "requests>=2.31,<3"
 python -m unittest discover -s tests -v
 ```
 
-## Installation
+## Installation from the NAWSP repository
 
-Clone or download this repository and package its contents so that `addon.xml` is at the root of the Kodi add-on ZIP. The installed add-on identity is `plugin.video.nawsp`.
+The Kodi repository is published at:
+
+`https://petrsvarc.github.io/not-another-webshare-plugin/`
+
+In Kodi:
+
+1. Open **Settings → File manager → Add source**.
+2. Enter `https://petrsvarc.github.io/not-another-webshare-plugin/` and name it `NAWSP`.
+3. Open **Add-ons → Install from zip file → NAWSP** and install `repository.nawsp-1.0.0.zip`.
+4. Open **Install from repository → NAWSP Repository → Video add-ons → Not Another WebShare Plugin**.
+5. Install NAWSP. Future versions can then be delivered through Kodi's normal add-on update mechanism.
+
+The repository add-on ID is `repository.nawsp`.
+
+## Publishing releases
+
+`scripts/build_kodi_repository.py` builds the static Kodi repository used by GitHub Pages. It creates:
+
+- `addons.xml` and `addons.xml.md5`;
+- `zips/plugin.video.nawsp/plugin.video.nawsp-X.Y.Z.zip`;
+- `zips/repository.nawsp/repository.nawsp-X.Y.Z.zip`;
+- a root-level repository ZIP used for the one-time Kodi File Manager bootstrap.
+
+The `Publish Kodi repository` GitHub Actions workflow validates these artifacts and deploys them to GitHub Pages.
+
+Normal releases should be tag-driven:
+
+1. update the version in `addon.xml`;
+2. merge the release changes to `main`;
+3. create a matching tag such as `v0.5.0`;
+4. the workflow verifies that the tag matches the add-on version, builds the ZIPs and publishes the repository automatically.
+
+The workflow can also be started manually with `workflow_dispatch`. Changes to the repository infrastructure itself trigger one deployment from `main`, which is used to bootstrap the Pages site.
 
 ## Configuration
 
