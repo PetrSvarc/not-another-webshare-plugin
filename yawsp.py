@@ -23,6 +23,7 @@ import xbmcaddon
 import xbmcvfs
 
 import series_manager
+from download_utils import sanitize_filename
 from webshare_api import (
     WebshareApiError,
     WebshareClient,
@@ -115,9 +116,12 @@ def revalidate():
                     icon=xbmcgui.NOTIFICATION_WARNING,
                 )
             return token
-        except WebshareError as exc:
-            log(f"Stored token is not valid: {exc}", xbmc.LOGWARNING)
+        except WebshareApiError as exc:
+            log(f"Stored token was rejected by Webshare: {exc}", xbmc.LOGWARNING)
             _addon.setSetting("token", "")
+        except WebshareTransportError as exc:
+            handle_webshare_error(exc)
+            return None
 
     return login()
 
@@ -745,6 +749,7 @@ def download(params):
     filename = info_xml.findtext("name") or params.get("name") or params["ident"]
     if normalize:
         filename = unidecode.unidecode(filename)
+    filename = sanitize_filename(filename, fallback=params["ident"])
 
     link = getlink(params["ident"], token, "file_download")
     if not link:
