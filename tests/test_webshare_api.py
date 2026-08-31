@@ -24,6 +24,7 @@ class WebshareClientTests(unittest.TestCase):
     def setUp(self):
         self.session = requests.Session()
         self.session.post = Mock()
+        self.session.get = Mock()
         self.client = WebshareClient(session=self.session, timeout=(1, 1))
 
     def test_login_uses_current_documented_payload(self):
@@ -61,6 +62,12 @@ class WebshareClientTests(unittest.TestCase):
 
         with self.assertRaises(WebshareTransportError):
             self.client.queue("token")
+
+    def test_missing_status_becomes_transport_error(self):
+        self.session.post.return_value = response("<response><total>0</total></response>")
+
+        with self.assertRaises(WebshareTransportError):
+            self.client.search("token", "query")
 
     def test_dequeue_sends_only_ident_plus_authentication(self):
         self.session.post.return_value = response(
@@ -100,6 +107,19 @@ class WebshareClientTests(unittest.TestCase):
 
         payload = self.session.post.call_args.kwargs["data"]
         self.assertNotIn("maybe_removed", payload)
+
+    def test_open_stream_wraps_request_errors_as_transport_errors(self):
+        self.session.get.side_effect = requests.ConnectionError("offline")
+
+        with self.assertRaises(WebshareTransportError) as caught:
+            self.client.open_stream("https://cdn.example/video")
+
+        self.assertIn("media request failed", str(caught.exception))
+        self.session.get.assert_called_once_with(
+            "https://cdn.example/video",
+            stream=True,
+            timeout=(1, 1),
+        )
 
 
 if __name__ == "__main__":
