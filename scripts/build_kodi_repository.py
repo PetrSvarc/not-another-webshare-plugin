@@ -189,7 +189,7 @@ def write_plugin_archive_index(output: Path, plugin_id: str, current_version: st
         suffix = " (current)" if version == current_version else ""
         items.append(
             f'    <li><a href="{html.escape(path.name)}">'
-            f'{html.escape(plugin_id)} {html.escape(version)}{suffix}</a></li>'
+            f'{html.escape(path.name)}{suffix}</a></li>'
         )
 
     page = f"""<!doctype html>
@@ -217,6 +217,16 @@ def write_index(output: Path, repository_zip: Path, plugin_id: str, plugin_versi
     repo_zip_name = html.escape(repository_zip.name)
     plugin_label = html.escape(f"{plugin_id} {plugin_version}")
     archive_href = html.escape(f"zips/{plugin_id}/")
+
+    # Kodi's HTTP directory parser is more reliable when installable ZIPs are linked
+    # directly from the source root instead of only through a nested HTML page.
+    version_items = []
+    for version, path in available_plugin_versions(output, plugin_id):
+        href = html.escape(f"zips/{plugin_id}/{path.name}")
+        label = html.escape(path.name)
+        suffix = " (current)" if version == plugin_version else ""
+        version_items.append(f'    <li><a href="{href}">{label}{suffix}</a></li>')
+
     page = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -229,7 +239,8 @@ def write_index(output: Path, repository_zip: Path, plugin_id: str, plugin_versi
   <p>Install the repository ZIP in Kodi, then install Not Another WebShare Plugin from the NAWSP Repository.</p>
   <ul>
     <li><a href="{repo_zip_name}">{repo_zip_name}</a></li>
-    <li><a href="{archive_href}">Previous plugin versions</a></li>
+{chr(10).join(version_items)}
+    <li><a href="{archive_href}">All plugin versions</a></li>
     <li><a href="addons.xml">addons.xml</a></li>
     <li><a href="addons.xml.md5">addons.xml.md5</a></li>
   </ul>
