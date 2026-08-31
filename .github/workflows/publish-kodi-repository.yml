@@ -12,7 +12,16 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
+    paths:
+      - ".github/publish-request"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to verify while publishing from main (for example v0.6.0)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -36,17 +45,34 @@ jobs:
           python-version: "3.12"
 
       - name: Verify release tag matches add-on version
-        if: github.ref_type == 'tag'
         shell: bash
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           VERSION="$(python - <<'PY'
           from xml.etree import ElementTree as ET
           print(ET.parse('addon.xml').getroot().get('version'))
           PY
           )"
-          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match addon.xml version v${VERSION}" >&2
-            exit 1
+
+          RELEASE_TAG=""
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          elif [ -n "${INPUT_RELEASE_TAG}" ]; then
+            RELEASE_TAG="${INPUT_RELEASE_TAG}"
+          elif [ -f .github/publish-request ]; then
+            RELEASE_TAG="$(tr -d '[:space:]' < .github/publish-request)"
+          fi
+
+          if [ -n "${RELEASE_TAG}" ]; then
+            if [ "${RELEASE_TAG}" != "v${VERSION}" ]; then
+              echo "Release tag ${RELEASE_TAG} does not match addon.xml version v${VERSION}" >&2
+              exit 1
+            fi
+            if ! git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+              echo "Release tag ${RELEASE_TAG} does not exist on origin" >&2
+              exit 1
+            fi
           fi
 
       - name: Build Kodi repository
