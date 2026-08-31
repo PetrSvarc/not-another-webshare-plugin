@@ -171,9 +171,26 @@ def _add_single_result(app, item, queue_command=None, label=None, label2=None):
     )
 
 
+def _add_plain_results(app, items, action, what, category, sort, limit, offset):
+    for item in items:
+        queue_command = _queue_command(
+            app,
+            item["ident"],
+            action,
+            what,
+            category,
+            sort,
+            limit,
+            offset,
+        )
+        _add_single_result(app, item, queue_command=queue_command)
+
+
 def _group_label(app, group):
-    template = app._addon.getLocalizedString(30501) or "{} — {} versions"
-    return template.format(group.best.media.display_title, len(group.versions))
+    return app._addon.getLocalizedString(30501).format(
+        group.best.media.display_title,
+        len(group.versions),
+    )
 
 
 def _add_group_result(app, group, what, category, sort, limit, offset):
@@ -210,19 +227,12 @@ def dosearch(app, token, what, category, sort, limit, offset, action):
 
     # Group only explicit video searches. "Everything" can contain non-video files
     # whose names happen to look like releases, so grouping them would be unsafe.
-    if category == "video":
-        result_groups = group_results(items, _preferences(app))
-    else:
-        result_groups = group_results(items, MediaPreferences())
-        result_groups = [group for group in result_groups for _ in (0,)]
-        # Force non-video categories back to individual rows.
-        result_groups = [
-            type(group)(key=None, versions=[version])
-            for group in result_groups
-            for version in group.versions
-        ]
+    if category != "video":
+        _add_plain_results(app, items, action, what, category, sort, limit, offset)
+        _add_next_page(app, xml, what, category, sort, limit, offset, action)
+        return
 
-    for group in result_groups:
+    for group in group_results(items, _preferences(app)):
         if group.grouped:
             _add_group_result(app, group, what, category, sort, limit, offset)
             continue
@@ -258,8 +268,7 @@ def _version_label(app, version, is_best):
         parts.append(app.sizelize(size))
     details = " · ".join(parts) or version.item.get("name", "?")
     if is_best:
-        prefix = app._addon.getLocalizedString(30502) or "Best match"
-        return f"{prefix} — {details}"
+        return f"{app._addon.getLocalizedString(30502)} — {details}"
     return details
 
 
@@ -320,7 +329,10 @@ def versions(app, params):
             label2=item.get("name"),
         )
 
-    xbmcplugin.endOfDirectory(app._handle, updateListing=bool(params.get("toqueue")))
+    xbmcplugin.endOfDirectory(
+        app._handle,
+        updateListing=bool(params.get("toqueue")),
+    )
 
 
 def install(app):
