@@ -131,7 +131,6 @@ def _clean_title(value: str) -> str:
     value = re.sub(r"[\[\]\(\){}]+", " ", value)
     value = re.sub(r"[._]+", " ", value)
     value = re.sub(r"\s*-\s*", " ", value)
-    value = _YEAR_RE.sub(" ", value)
     value = re.sub(r"\s+", " ", value).strip(" -._")
     if not value:
         return ""
@@ -203,8 +202,11 @@ def parse_media(name: str) -> MediaDescriptor:
             codec=codec,
         )
 
-    year_match = _YEAR_RE.search(base)
-    if year_match:
+    year_matches = list(_YEAR_RE.finditer(base))
+    if year_matches:
+        # The release year is normally the last year token before technical tags.
+        # This handles titles such as "1917.2019.1080p" and "Blade.Runner.2049.2017".
+        year_match = year_matches[-1]
         year = int(year_match.group(1))
         title = _clean_title(base[: year_match.start()])
         normalized = _normalize_title(title)
