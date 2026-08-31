@@ -9,7 +9,7 @@ This project is an independently maintained fork of **Yet Another Webshare Plugi
 - **Name:** Not Another WebShare Plugin
 - **ID:** `plugin.video.nawsp`
 - **Short name:** NAWSP
-- **Current version:** 0.4.0
+- **Current version:** 0.5.0
 - **Kodi runtime:** Python 3 (`xbmc.python` 3.0.0+)
 - **License:** GNU Affero General Public License v3.0
 
@@ -17,6 +17,8 @@ This project is an independently maintained fork of **Yet Another Webshare Plugi
 
 - Webshare account authentication
 - Search and browsing
+- Grouped movie/episode search results with ranked media versions
+- Preferred language, quality and HEVC search ranking
 - Video playback
 - Queue and download history
 - File downloads
@@ -25,20 +27,34 @@ This project is an independently maintained fork of **Yet Another Webshare Plugi
 
 ## Architecture
 
-The 0.4.0 refactor separates Kodi UI concerns from Webshare communication:
+NAWSP separates Kodi UI concerns from Webshare communication and keeps filename parsing/ranking independently testable:
 
 - `main.py` — Kodi entry point.
 - `yawsp.py` — Kodi menus, routing, playback and download orchestration.
 - `webshare_api.py` — Kodi-independent Webshare HTTP/XML client.
+- `media_results.py` — Kodi-independent media filename parsing, conservative grouping and deterministic ranking.
+- `search_results_ui.py` — Kodi grouped-search and versions-view integration.
 - `series_manager.py` — series discovery, local series metadata and season/episode menus.
 - `md5crypt.py` — historical password-digest helper retained from upstream.
-- `tests/test_webshare_api.py` — API-client regression tests.
+- `tests/` — API-client and media parsing/ranking regression tests.
 
-This separation makes Webshare request behavior testable without importing Kodi modules.
+This separation makes Webshare request behavior and media matching/ranking testable without importing Kodi modules.
+
+## Media grouping and ranking
+
+Version 0.5.0 makes video search behave more like a media browser than a raw filename list:
+
+- movie releases are conservatively grouped by normalized title and release year;
+- TV releases are conservatively grouped by series, season and episode;
+- ambiguous filenames remain normal individual search results;
+- grouped items open a versions view with a deterministic **Best match** first;
+- ranking can prefer Czech, Slovak or English, a target resolution and HEVC;
+- password-protected files can optionally be hidden;
+- original Webshare filename, size and context actions remain available.
 
 ## Webshare API modernization
 
-Version 0.4.0 aligns the integration with the current Webshare API reference:
+Version 0.4.0 aligned the integration with the current Webshare API reference:
 
 - login uses `username_or_email`, the salted password digest and `keep_logged_in`;
 - queue removal uses the documented `ident` parameter;
@@ -53,12 +69,13 @@ The old experimental **Backup DB** code was removed. It downloaded and extracted
 
 ## Development
 
-The repository includes a GitHub Actions validation workflow. It:
+The repository includes GitHub Actions validation. It:
 
 1. compiles the Python sources;
-2. runs the Kodi-independent `WebshareClient` unit tests on supported Python 3 versions.
+2. runs the Kodi-independent unit tests on supported Python 3 versions;
+3. validates the generated Kodi repository/package structure when distribution files change.
 
-Run the API tests locally with:
+Run the tests locally with:
 
 ```bash
 python -m pip install "requests>=2.31,<3"
@@ -92,14 +109,14 @@ The repository add-on ID is `repository.nawsp`.
 
 The `Publish Kodi repository` GitHub Actions workflow validates these artifacts and deploys them to GitHub Pages.
 
-Normal releases should be tag-driven:
+Normal releases are tag-driven:
 
 1. update the version in `addon.xml`;
 2. merge the release changes to `main`;
 3. create a matching tag such as `v0.5.0`;
 4. the workflow verifies that the tag matches the add-on version, builds the ZIPs and publishes the repository automatically.
 
-The workflow can also be started manually with `workflow_dispatch`. Changes to the repository infrastructure itself trigger one deployment from `main`, which is used to bootstrap the Pages site.
+The workflow can also be started explicitly with `workflow_dispatch`. Normal feature merges do not deploy a Kodi release, which prevents changed code from being republished under an existing version number.
 
 ## Configuration
 
