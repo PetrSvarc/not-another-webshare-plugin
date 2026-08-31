@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon id="repository.nawsp" name="NAWSP Repository" version="1.0.0" provider-name="PetrSvarc">
+    <extension point="xbmc.addon.repository" name="NAWSP Repository">
+        <dir minversion="19.0.0">
+            <info compressed="false">https://petrsvarc.github.io/not-another-webshare-plugin/addons.xml</info>
+            <checksum>https://petrsvarc.github.io/not-another-webshare-plugin/addons.xml.md5</checksum>
+            <datadir zip="true">https://petrsvarc.github.io/not-another-webshare-plugin/zips/</datadir>
+            <hashes>false</hashes>
+        </dir>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>NAWSP Kodi add-on repository</summary>
+        <description>Repository for installing and automatically updating Not Another WebShare Plugin (NAWSP).</description>
+        <platform>all</platform>
+        <license>AGPL-3.0</license>
+        <source>https://github.com/PetrSvarc/not-another-webshare-plugin</source>
+    </extension>
+</addon>
