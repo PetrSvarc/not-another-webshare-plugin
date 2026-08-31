@@ -107,16 +107,18 @@ The repository add-on ID is `repository.nawsp`.
 - `zips/repository.nawsp/repository.nawsp-X.Y.Z.zip`;
 - a root-level repository ZIP used for the one-time Kodi File Manager bootstrap.
 
-The `Publish Kodi repository` GitHub Actions workflow validates these artifacts and deploys them to GitHub Pages.
+Normal releases are handled by the **Release NAWSP** GitHub Actions workflow. From **Actions → Release NAWSP → Run workflow**, enter a semantic version such as `0.6.0`. The workflow then:
 
-Normal releases are tag-driven:
+1. validates the requested version and prevents downgrades/duplicate tags;
+2. updates the version in `addon.xml` and the README;
+3. commits the release metadata to `main`;
+4. creates the matching tag, for example `v0.6.0`;
+5. creates a GitHub Release with generated notes;
+6. explicitly dispatches the Kodi repository publisher on that tag.
 
-1. update the version in `addon.xml`;
-2. merge the release changes to `main`;
-3. create a matching tag such as `v0.5.0`;
-4. the workflow verifies that the tag matches the add-on version, builds the ZIPs and publishes the repository automatically.
+The **Publish Kodi repository** workflow verifies that the tag matches the add-on version, builds the Kodi ZIPs and repository metadata, and deploys them to GitHub Pages. Kodi can then discover the new version through `repository.nawsp`.
 
-The workflow can also be started explicitly with `workflow_dispatch`. Normal feature merges do not deploy a Kodi release, which prevents changed code from being republished under an existing version number.
+For automated/bootstrap releases, changing `.github/release-request` on `main` triggers the same release workflow using the version stored in that file. Normal feature merges do not publish a Kodi release.
 
 ## Configuration
 
